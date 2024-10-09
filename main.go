@@ -4,25 +4,33 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/bwmarrin/discordgo"
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	"io/ioutil"
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 )
 
 const prefix string = "!smashbot"
 
+type Database struct {
+	Players []Player `json:"players"`
+	Tables  []Table  `json:"tables"`
+}
+
 type Player struct {
 	ID       string `json:"id"`
 	Username string `json:"username"`
 	//rajouter d'autre champs
 }
-type Database struct {
-	Players []Player `json:"players"`
-	//table []Table `json:"table"`
+
+type Table struct {
+	ID        string `json:"id"`
+	Available bool   `json:"available"`
 }
 
 func loadDatabase() (Database, error) {
@@ -44,6 +52,26 @@ func saveDatabase(db Database) error {
 		return err
 	}
 	return ioutil.WriteFile("database.json", file, 0644)
+}
+
+func addTable(db *Database, numTables int) error {
+	for i := 0; i < numTables; i++ {
+		newID := fmt.Sprintf("table_%s", uuid.New().String())
+		newTable := Table{
+			ID:        newID,
+			Available: true,
+		}
+		db.Tables = append(db.Tables, newTable)
+	}
+	return saveDatabase(*db)
+}
+
+func removeTables(db *Database, numTables int) error {
+	if numTables > len(db.Tables) {
+		return fmt.Errorf("pas assez de tables à supprimer")
+	}
+	db.Tables = db.Tables[:len(db.Tables)-numTables]
+	return saveDatabase(*db)
 }
 
 func addPlayer(db *Database, player Player) error {
@@ -163,9 +191,45 @@ func main() {
 			}
 			sendEmbed(s, m.ChannelID, "Succès", fmt.Sprintf("Joueur %s supprimé avec succès!", username), 0x00FF00)
 
+		// add a tables
+		case args[1] == "add" && args[2] == "tables":
+			if len(args) != 4 {
+				sendEmbed(s, m.ChannelID, "Erreur", "Usage: !smashbot help", 0xFF0000)
+				return
+			}
+			numTables, err := strconv.Atoi(args[3])
+			if err != nil {
+				sendEmbed(s, m.ChannelID, "Erreur", "Nombre de tables invalide", 0xFF0000)
+				return
+			}
+			err = addTable(&db, numTables)
+			if err != nil {
+				sendEmbed(s, m.ChannelID, "Erreur", "Erreur lors de l'ajout des tables : "+err.Error(), 0xFF0000)
+				return
+			}
+			sendEmbed(s, m.ChannelID, "Succès", fmt.Sprintf("%d tables ajoutées avec succès!", numTables), 0x00FF00)
+
+			// remove a tables
+		case args[1] == "remove" && args[2] == "tables":
+			if len(args) != 4 {
+				sendEmbed(s, m.ChannelID, "Erreur", "Usage: !smashbot help", 0xFF0000)
+				return
+			}
+			numTables, err := strconv.Atoi(args[3])
+			if err != nil {
+				sendEmbed(s, m.ChannelID, "Erreur", "Nombre de tables invalide", 0xFF0000)
+				return
+			}
+			err = removeTables(&db, numTables)
+			if err != nil {
+				sendEmbed(s, m.ChannelID, "Erreur", "Erreur lors de la suppréssion des tables : "+err.Error(), 0xFF0000)
+				return
+			}
+			sendEmbed(s, m.ChannelID, "Succès", fmt.Sprintf("%d tables supprimer avec succès!", numTables), 0x00FF00)
+
 		//pour afficher l'aide
 		case len(args) == 2 && args[1] == "help":
-			sendEmbed(s, m.ChannelID, "Aide", "Commandes disponibles:\n!smashbot add player <username>\n!smashbot remove player <username> \n!smashbot list player", 0x00FF00)
+			sendEmbed(s, m.ChannelID, "Aide", "Commandes disponibles:\n!smashbot add player <username>\n!smashbot remove player <username> \n!smashbot list player \n!smashbot add tables <number> \n!smashbot remove tables <number>", 0x00FF00)
 
 		default:
 			sendEmbed(s, m.ChannelID, "Erreur", "Commande non reconnue. Utilisez !smashbot help", 0xFF0000)
