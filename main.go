@@ -6,7 +6,6 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
-	"io/ioutil"
 	"log"
 	"math/rand"
 	"os"
@@ -19,9 +18,9 @@ import (
 const prefix string = "!smashbot"
 
 type Database struct {
-	Players     []Player     `json:"players"`
-	Tables      []Table      `json:"tables"`
-	Tournaments []Tournament `json:"tournaments"`
+	Players    map[string]Player `json:"players"`
+	Tables     map[string]Table  `json:"tables"`
+	Tournament *Tournament       `json:"tournament"`
 }
 type Round struct {
 	Matches []Match `json:"matches"`
@@ -39,20 +38,22 @@ type Table struct {
 }
 
 type Tournament struct {
-	ID           string   `json:"id"`
-	Matches      []Match  `json:"matches"`
-	Rounds       []Round  `json:"rounds"`
-	Players      []string `json:"players"`
-	Status       TournamentStatus
-	CurrentRound int `json:"current_round"`
+	ID           string                     `json:"id"`
+	Matches      []Match                    `json:"matches"`
+	Rounds       []Round                    `json:"rounds"`
+	Players      []string                   `json:"player_ids"`
+	Status       TournamentStatus           `json:"status"`
+	CurrentRound int                        `json:"current_round"`
+	Stages       map[string]map[string]bool `json:"stages"`
 }
 
 type Match struct {
-	ID      string `json:"id"`
-	Player1 string `json:"player1"`
-	Player2 string `json:"player2"`
-	Winner  string `json:"winner"`
-	TableID string `json:"table_id"`
+	ID      string   `json:"id"`
+	Players []string `json:"players"`
+	Player1 string   `json:"player1"`
+	Player2 string   `json:"player2"`
+	Winner  string   `json:"winner"`
+	TableID string   `json:"table_id"`
 }
 
 type TournamentStatus string
@@ -63,175 +64,55 @@ const (
 	TournamentStatusComplete TournamentStatus = "complete"
 )
 
-func loadDatabase() (Database, error) {
-	var db Database
-	file, err := ioutil.ReadFile("database.json")
+func loadDatabase() (*Database, error) {
+	file, err := os.ReadFile("database.json")
 	if err != nil {
 		if os.IsNotExist(err) {
-			return db, nil
+			log.Println("Database file does not exist. Creating a new one.")
+			return &Database{
+				Players: make(map[string]Player),
+				Tables:  make(map[string]Table),
+			}, nil
 		}
-		return db, err
+		log.Printf("Error reading database file: %v", err)
+		return nil, fmt.Errorf("error reading database file: %w", err)
 	}
-	err = json.Unmarshal(file, &db)
-	return db, err
+
+	var db Database
+	if err := json.Unmarshal(file, &db); err != nil {
+		log.Printf("Error unmarshalling database: %v", err)
+		return nil, fmt.Errorf("error unmarshalling database: %w", err)
+	}
+
+	log.Println("Database loaded successfully")
+	return &db, nil
 }
 
 func saveDatabase(db Database) error {
 	file, err := json.MarshalIndent(db, "", "  ")
 	if err != nil {
-		return err
-	}
-	return ioutil.WriteFile("database.json", file, 0644)
-}
-
-func startTournament(db *Database) (*Tournament, error) {
-	if len(db.Players) < 2 {
-		return nil, fmt.Errorf("pas assez de joueurs pour démarrer un tournoi")
+		log.Printf("Error marshalling database: %v", err)
+		return fmt.Errorf("error marshalling database: %w", err)
 	}
 
-	if len(db.Tables) == 0 {
-		return nil, fmt.Errorf("aucune table disponible")
+	err = os.WriteFile("database.json", file, 0644)
+	if err != nil {
+		log.Printf("Error writing database file: %v", err)
+		return fmt.Errorf("error writing database file: %w", err)
 	}
 
-	tournament := &Tournament{
-		ID:           fmt.Sprintf("T%d", len(db.Tournaments)+1),
-		CurrentRound: 0,
-		Status:       TournamentStatusPending,
-	}
-
-	players := make([]string, len(db.Players))
-	for i, player := range db.Players {
-		players[i] = player.Username
-	}
-	rand.Shuffle(len(players), func(i, j int) { players[i], players[j] = players[j], players[i] })
-	tournament.Players = players
-
-	// Créer le premier tour
-	firstRound := createRound(players, db.Tables)
-	tournament.Rounds = append(tournament.Rounds, firstRound)
-	tournament.Status = TournamentStatusOngoing
-
-	db.Tournaments = append(db.Tournaments, *tournament)
-	return tournament, saveDatabase(*db)
-}
-
-func createRound(players []string, tables []Table) Round {
-	round := Round{}
-	tableIndex := 0
-
-	for i := 0; i < len(players); i += 2 {
-		match := Match{
-			ID:      fmt.Sprintf("M%d", len(round.Matches)+1),
-			Player1: players[i],
-			TableID: tables[tableIndex].ID,
-		}
-		if i+1 < len(players) {
-			match.Player2 = players[i+1]
-		} else {
-			// Si c'est un joueur seul, il passe automatiquement au tour suivant
-			match.Winner = players[i]
-		}
-		round.Matches = append(round.Matches, match)
-		tableIndex = (tableIndex + 1) % len(tables)
-	}
-
-	return round
-}
-
-func updateTournament(db *Database, tournamentID string) error {
-	for i, t := range db.Tournaments {
-		if t.ID == tournamentID {
-			currentRound := t.Rounds[t.CurrentRound]
-			allMatchesComplete := true
-			winners := []string{}
-
-			for _, match := range currentRound.Matches {
-				if match.Winner == "" {
-					allMatchesComplete = false
-					break
-				}
-				winners = append(winners, match.Winner)
-			}
-
-			if allMatchesComplete {
-				if len(winners) == 1 {
-					// Le tournoi est terminé
-					db.Tournaments[i].Status = TournamentStatusComplete
-				} else {
-					// Créer le prochain tour
-					nextRound := createRound(winners, db.Tables)
-					db.Tournaments[i].Rounds = append(db.Tournaments[i].Rounds, nextRound)
-					db.Tournaments[i].CurrentRound++
-				}
-			}
-
-			return saveDatabase(*db)
-		}
-	}
-
-	return fmt.Errorf("tournoi non trouvé")
-}
-
-func updateMatchResult(db *Database, matchID string, winnerName string) error {
-	for i, tournament := range db.Tournaments {
-		for j, round := range tournament.Rounds {
-			for k, match := range round.Matches {
-				if match.ID == matchID {
-					// Normaliser les noms pour la comparaison
-					normalizedWinner := strings.ToLower(strings.TrimSpace(winnerName))
-					normalizedPlayer1 := strings.ToLower(strings.TrimSpace(match.Player1))
-					normalizedPlayer2 := strings.ToLower(strings.TrimSpace(match.Player2))
-
-					if normalizedWinner != normalizedPlayer1 && normalizedWinner != normalizedPlayer2 {
-						return fmt.Errorf("le gagnant doit être l'un des joueurs du match: %s ou %s", match.Player1, match.Player2)
-					}
-
-					// Utiliser le nom original du joueur pour la mise à jour
-					if normalizedWinner == normalizedPlayer1 {
-						db.Tournaments[i].Rounds[j].Matches[k].Winner = match.Player1
-					} else {
-						db.Tournaments[i].Rounds[j].Matches[k].Winner = match.Player2
-					}
-
-					return updateTournament(db, tournament.ID)
-				}
-			}
-		}
-	}
-	return fmt.Errorf("match non trouvé")
-}
-
-func getTournamentStatus(db Database) string {
-	if len(db.Tournaments) == 0 {
-		return "Aucun tournoi en cours."
-	}
-
-	tournament := db.Tournaments[len(db.Tournaments)-1]
-	status := fmt.Sprintf("État du tournoi (ID: %s):\n", tournament.ID)
-	status += fmt.Sprintf("Statut: %s\n", tournament.Status)
-	status += fmt.Sprintf("Tour actuel: %d\n\n", tournament.CurrentRound+1)
-
-	currentRound := tournament.Rounds[tournament.CurrentRound]
-	status += "Matchs en cours:\n"
-	for _, match := range currentRound.Matches {
-		status += fmt.Sprintf("- Match %s: %s vs %s", match.ID, match.Player1, match.Player2)
-		if match.Winner != "" {
-			status += fmt.Sprintf(" (Gagnant: %s)", match.Winner)
-		}
-		status += "\n"
-	}
-
-	return status
+	log.Println("Database saved successfully")
+	return nil
 }
 
 func addTable(db *Database, numTables int) error {
 	for i := 0; i < numTables; i++ {
-		newID := fmt.Sprintf("table_%s", uuid.New().String())
+		id := uuid.New().String()
 		newTable := Table{
-			ID:        newID,
+			ID:        id,
 			Available: true,
 		}
-		db.Tables = append(db.Tables, newTable)
+		db.Tables[id] = newTable
 	}
 	return saveDatabase(*db)
 }
@@ -240,39 +121,266 @@ func removeTables(db *Database, numTables int) error {
 	if numTables > len(db.Tables) {
 		return fmt.Errorf("pas assez de tables à supprimer")
 	}
-	db.Tables = db.Tables[:len(db.Tables)-numTables]
-	return saveDatabase(*db)
-}
 
-func addPlayer(db *Database, player Player) error {
-	for _, p := range db.Players {
-		if p.Username == player.Username {
-			return fmt.Errorf("player already exists")
+	count := 0
+	for id := range db.Tables {
+		if count >= numTables {
+			break
 		}
+		delete(db.Tables, id)
+		count++
 	}
-	db.Players = append(db.Players, player)
 	return saveDatabase(*db)
 }
 
-func listPlayers(db Database) string {
+func (db *Database) addPlayer(player Player) error {
+	if _, exists := db.Players[player.ID]; exists {
+		return fmt.Errorf("player already exists")
+	}
+	db.Players[player.ID] = player
+	return saveDatabase(*db)
+}
+
+func listPlayers(db *Database) string {
 	if len(db.Players) == 0 {
 		return "No players"
 	}
 	var playersList strings.Builder
-	for i, player := range db.Players {
-		playersList.WriteString(fmt.Sprintf("%d. %s\n", i+1, player.Username))
+	count := 1
+	for _, player := range db.Players {
+		playersList.WriteString(fmt.Sprintf("%d. %s\n", count, player.Username))
+		count++
 	}
 	return playersList.String()
 }
 
-func removePlayer(db *Database, username string) error {
-	for i, p := range db.Players {
-		if p.Username == username {
-			db.Players = append(db.Players[:i], db.Players[i+1:]...)
+func (db *Database) removePlayer(username string) error {
+	for id, player := range db.Players {
+		if player.Username == username {
+			delete(db.Players, id)
 			return saveDatabase(*db)
 		}
 	}
 	return fmt.Errorf("player not found")
+}
+
+func startTournament(db *Database) error {
+	if len(db.Players) < 2 {
+		return fmt.Errorf("pas assez de joueurs pour démarrer un tournoi")
+	}
+
+	if len(db.Tables) == 0 {
+		return fmt.Errorf("aucune table disponible")
+	}
+
+	playerNames := make([]string, 0, len(db.Players))
+	for _, player := range db.Players {
+		playerNames = append(playerNames, player.Username)
+	}
+	rand.Shuffle(len(playerNames), func(i, j int) {
+		playerNames[i], playerNames[j] = playerNames[j], playerNames[i]
+	})
+
+	db.Tournament = createTournament(playerNames)
+
+	return saveDatabase(*db)
+}
+
+func createMatches(player []string) []Match {
+	var (
+		matches = []Match{}
+	)
+	evenCount := nearestEvenNumber(len(player))
+
+	for i := 0; i < evenCount; i += 2 {
+		matches = append(matches, Match{
+			ID:      "",
+			Players: nil,
+			Player1: player[i],
+			Player2: player[i+1],
+			Winner:  "",
+			TableID: "",
+		})
+	}
+	for i := evenCount; i < len(player); i++ {
+		matches = append(matches, Match{
+			Player1: player[i],
+		})
+	}
+
+	return matches
+}
+
+func createTournament(playerNames []string) *Tournament {
+	tournament := &Tournament{
+		ID:           fmt.Sprintf("T%d", len(playerNames)),
+		CurrentRound: 0,
+		Status:       TournamentStatusPending,
+		Players:      playerNames,
+		Stages:       make(map[string]map[string]bool),
+	}
+
+	for _, playerNames := range playerNames {
+		tournament.addPlayerToStage("stage1", playerNames)
+	}
+
+	firstRound := Round{
+		Matches: createMatches(playerNames),
+	}
+
+	tournament.Rounds = append(tournament.Rounds, firstRound)
+	tournament.Status = TournamentStatusOngoing
+
+	return tournament
+}
+
+func (t *Tournament) addPlayerToStage(stageName string, playerName string) {
+	if t.Stages[stageName] == nil {
+		t.Stages[stageName] = make(map[string]bool)
+	}
+	t.Stages[stageName][playerName] = true
+}
+
+func createRound(tournament *Tournament, tables map[string]Table) Round {
+	round := Round{}
+	tableIDs := make([]string, 0, len(tables))
+	for id := range tables {
+		tableIDs = append(tableIDs, id)
+	}
+	tableIndex := 0
+	currentStage := fmt.Sprintf("stage%d", tournament.CurrentRound+1)
+	nextStage := fmt.Sprintf("stage%d", tournament.CurrentRound+2)
+
+	playersMap := tournament.Stages[currentStage]
+	players := make([]string, 0, len(playersMap))
+	for player := range playersMap {
+		players = append(players, player)
+	}
+
+	for len(players) > 0 && tableIndex < len(tables) {
+		match := Match{
+			ID:      fmt.Sprintf("M%d", len(round.Matches)+1),
+			Player1: players[0],
+			TableID: tableIDs[tableIndex],
+		}
+		players = players[1:]
+
+		if len(players) > 0 {
+			match.Player2 = players[0]
+			players = players[1:]
+		} else {
+			match.Winner = match.Player1
+			if tournament.Stages[nextStage] == nil {
+				tournament.Stages[nextStage] = make(map[string]bool)
+			}
+			tournament.Stages[nextStage][match.Player1] = true
+		}
+
+		round.Matches = append(round.Matches, match)
+		tableIndex++
+	}
+
+	for _, player := range players {
+		if tournament.Stages[nextStage] == nil {
+			tournament.Stages[nextStage] = make(map[string]bool)
+		}
+		tournament.Stages[nextStage][player] = true
+	}
+
+	return round
+}
+
+func advanceToNextStage(tournament *Tournament, winner string) {
+	nextStage := fmt.Sprintf("stage%d", tournament.CurrentRound+2)
+	if tournament.Stages[nextStage] == nil {
+		tournament.Stages[nextStage] = make(map[string]bool)
+	}
+	tournament.Stages[nextStage][winner] = true
+}
+
+func updateTournament(db *Database) error {
+	if db.Tournament == nil {
+		return fmt.Errorf("no active tournament")
+	}
+
+	currentRound := db.Tournament.Rounds[db.Tournament.CurrentRound]
+	allMatchesComplete := true
+
+	for _, match := range currentRound.Matches {
+		if match.Winner == "" {
+			allMatchesComplete = false
+			break
+		}
+		advanceToNextStage(db.Tournament, match.Winner)
+	}
+
+	if allMatchesComplete {
+		nextStage := fmt.Sprintf("stage%d", db.Tournament.CurrentRound+2)
+		if len(db.Tournament.Stages[nextStage]) <= 1 {
+			db.Tournament.Status = TournamentStatusComplete
+		} else {
+			nextRound := createRound(db.Tournament, db.Tables)
+			db.Tournament.Rounds = append(db.Tournament.Rounds, nextRound)
+			db.Tournament.CurrentRound++
+		}
+	}
+
+	return saveDatabase(*db)
+}
+
+func updateMatchResult(db *Database, matchID string, winnerName string) error {
+	if db.Tournament == nil {
+		return fmt.Errorf("no active tournament")
+	}
+
+	for j, round := range db.Tournament.Rounds {
+		for k, match := range round.Matches {
+			if match.ID == matchID {
+				if match.Player1 != winnerName && match.Player2 != winnerName {
+					return fmt.Errorf("le gagnant doit être l'un des joueurs du match: %s ou %s", match.Player1, match.Player2)
+				}
+
+				db.Tournament.Rounds[j].Matches[k].Winner = winnerName
+				return updateTournament(db)
+			}
+		}
+	}
+	return fmt.Errorf("match non trouvé")
+
+}
+
+func getTournamentStatus(db Database) string {
+	if db.Tournament == nil {
+		return "Aucun tournoi en cours."
+	}
+
+	status := fmt.Sprintf("État du tournoi (ID: %s):\n", db.Tournament.ID)
+	status += fmt.Sprintf("Statut: %s\n", db.Tournament.Status)
+	status += fmt.Sprintf("Tour actuel: %d\n\n", db.Tournament.CurrentRound+1)
+
+	currentRound := db.Tournament.Rounds[db.Tournament.CurrentRound]
+	status += "Matchs en cours:\n"
+	for _, match := range currentRound.Matches {
+		player1Name := db.Players[match.Player1].Username
+		player2Name := db.Players[match.Player2].Username
+		status += fmt.Sprintf("- Match %s: %s vs %s", match.ID, player1Name, player2Name)
+		if match.Winner != "" {
+			winnerName := db.Players[match.Winner].Username
+			status += fmt.Sprintf(" (Gagnant: %s)", winnerName)
+		}
+		status += "\n"
+	}
+
+	return status
+}
+
+func (db *Database) GetPlayer(id string) (Player, bool) {
+	player, exists := db.Players[id]
+	return player, exists
+}
+
+func nearestEvenNumber(n int) int {
+	return n - (n % 2)
 }
 
 func sendEmbed(s *discordgo.Session, channelID, title, description string, color int) {
@@ -281,7 +389,11 @@ func sendEmbed(s *discordgo.Session, channelID, title, description string, color
 		Description: description,
 		Color:       color,
 	}
-	s.ChannelMessageSendEmbed(channelID, embed)
+	_, err := s.ChannelMessageSendEmbed(channelID, embed)
+	if err != nil {
+		log.Printf("Erreur lors de l'envoi de l'embed: %v", err)
+	}
+
 }
 
 func main() {
@@ -303,16 +415,22 @@ func main() {
 	sess.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
 		if m.Author.ID == s.State.User.ID {
 			return
-
 		}
 
 		args := strings.Split(m.Content, " ")
-		if args[0] != prefix {
+		if len(args) == 0 || args[0] != prefix {
+			return
+		}
+
+		if len(args) < 2 {
+			sendEmbed(s, m.ChannelID, "Erreur", "Commande incomplète. Utilisez !smashbot help pour voir les commandes disponibles.", 0xFF0000)
 			return
 		}
 
 		if args[1] == "hello" {
-			s.ChannelMessageSend(m.ChannelID, "world!")
+			if _, err := s.ChannelMessageSend(m.ChannelID, "world!"); err != nil {
+				log.Printf("Erreur lors de l'envoi du message: %v", err)
+			}
 		}
 
 		db, err := loadDatabase()
@@ -334,7 +452,7 @@ func main() {
 				Username: strings.Join(args[3:], " "),
 			}
 
-			err = addPlayer(&db, newPlayer)
+			err = db.addPlayer(newPlayer)
 			if err != nil {
 				sendEmbed(s, m.ChannelID, "Erreur", "Erreur lors de l'ajout du joueur: "+err.Error(), 0xFF0000)
 				return
@@ -354,7 +472,7 @@ func main() {
 				return
 			}
 			username := strings.Join(args[3:], " ")
-			err = removePlayer(&db, username)
+			err = db.removePlayer(username)
 			if err != nil {
 				sendEmbed(s, m.ChannelID, "Erreur", "Erreur lors de l'ajout du joueur: "+err.Error(), 0xFF0000)
 				return
@@ -372,28 +490,29 @@ func main() {
 				sendEmbed(s, m.ChannelID, "Erreur", "Nombre de tables invalide", 0xFF0000)
 				return
 			}
-			err = addTable(&db, numTables)
+			err = addTable(db, numTables)
 			if err != nil {
 				sendEmbed(s, m.ChannelID, "Erreur", "Erreur lors de l'ajout des tables : "+err.Error(), 0xFF0000)
 				return
 			}
 			sendEmbed(s, m.ChannelID, "Succès", fmt.Sprintf("%d tables ajoutées avec succès!", numTables), 0x00FF00)
 
+		//pour démarrer un tournoi
 		case len(args) == 3 && args[1] == "tournament" && args[2] == "start":
-			tournament, err := startTournament(&db)
+			err := startTournament(db)
 			if err != nil {
 				sendEmbed(s, m.ChannelID, "Erreur", "Erreur lors du démarrage du tournoi : "+err.Error(), 0xFF0000)
 				return
 			}
 
 			var matchesInfo strings.Builder
-			matchesInfo.WriteString(fmt.Sprintf("Tournoi ID: %s\n\n", tournament.ID))
+			matchesInfo.WriteString(fmt.Sprintf("Tournoi ID: %s\n\n", db.Tournament.ID))
 			matchesInfo.WriteString("Liste des joueurs:\n")
-			for i, player := range tournament.Players {
+			for i, player := range db.Tournament.Players {
 				matchesInfo.WriteString(fmt.Sprintf("%d. %s\n", i+1, player))
 			}
 			matchesInfo.WriteString("\nMatches du premier tour:\n")
-			for _, match := range tournament.Rounds[0].Matches {
+			for _, match := range db.Tournament.Rounds[0].Matches {
 				if match.Player2 != "" {
 					matchesInfo.WriteString(fmt.Sprintf("Match ID: %s - %s vs %s (Table: %s)\n",
 						match.ID, match.Player1, match.Player2, match.TableID))
@@ -405,10 +524,11 @@ func main() {
 
 			sendEmbed(s, m.ChannelID, "Tournoi démarré", matchesInfo.String(), 0x00FF00)
 
+		//pour mettre à jour le résultat d'un match
 		case len(args) == 5 && args[1] == "match" && args[2] == "result":
 			matchID := args[3]
 			winnerName := args[4]
-			err := updateMatchResult(&db, matchID, winnerName)
+			err := updateMatchResult(db, matchID, winnerName)
 			if err != nil {
 				sendEmbed(s, m.ChannelID, "Erreur", "Erreur lors de la mise à jour du résultat : "+err.Error(), 0xFF0000)
 				return
@@ -417,7 +537,7 @@ func main() {
 
 		//pour afficher l'état du tournoi
 		case len(args) == 3 && args[1] == "tournament" && args[2] == "status":
-			status := getTournamentStatus(db)
+			status := getTournamentStatus(*db)
 			sendEmbed(s, m.ChannelID, "État du tournoi", status, 0x00FF00)
 
 			// remove a tables
@@ -431,7 +551,7 @@ func main() {
 				sendEmbed(s, m.ChannelID, "Erreur", "Nombre de tables invalide", 0xFF0000)
 				return
 			}
-			err = removeTables(&db, numTables)
+			err = removeTables(db, numTables)
 			if err != nil {
 				sendEmbed(s, m.ChannelID, "Erreur", "Erreur lors de la suppréssion des tables : "+err.Error(), 0xFF0000)
 				return
