@@ -273,7 +273,6 @@ func createMatches(player []string) []Match {
 			Player1: player[i],
 		})
 	}
-
 	return matches
 }
 
@@ -316,7 +315,6 @@ func createRound(tournament *Tournament, tables []Table) Round {
 		round.Matches = append(round.Matches, match)
 		tableIndex = (tableIndex + 1) % len(tables)
 	}
-
 	return round
 }
 
@@ -370,7 +368,6 @@ func updateTournament(db *Database) error {
 			tournament.CurrentRound++
 		}
 	}
-
 	return saveDatabase(*db)
 }
 
