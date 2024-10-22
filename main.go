@@ -374,30 +374,6 @@ func updateTournament(db *Database) error {
 	return saveDatabase(*db)
 }
 
-// Creates a new tournament with the given player names
-func createTournament(playerNames []string) *Tournament {
-	tournament := &Tournament{
-		ID:           fmt.Sprintf("T%d", len(playerNames)),
-		CurrentRound: 0,
-		Status:       TournamentStatusPending,
-		Players:      playerNames,
-		Stages:       make(map[string]map[string]bool),
-	}
-
-	for _, playerNames := range playerNames {
-		tournament.addPlayerToStage("stage1", playerNames)
-	}
-
-	firstRound := Round{
-		Matches: createMatches(playerNames),
-	}
-
-	tournament.Rounds = append(tournament.Rounds, firstRound)
-	tournament.Status = TournamentStatusOngoing
-
-	return tournament
-}
-
 // Adds a player to the specified stage
 func (t *Tournament) addPlayerToStage(stageName string, playerName string) {
 	if t.Stages[stageName] == nil {
