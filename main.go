@@ -328,7 +328,6 @@ func updateMatchResult(db *Database, matchID string, winnerName string) error {
 				if match.Player1 != winnerName && match.Player2 != winnerName {
 					return fmt.Errorf("le gagnant doit être l'un des joueurs du match: %s ou %s", match.Player1, match.Player2)
 				}
-
 				db.Tournaments[len(db.Tournaments)-1].Rounds[j].Matches[k].Winner = winnerName
 				return updateTournament(db)
 			}
@@ -386,6 +385,7 @@ func advanceToNextStage(tournament *Tournament, winner string) {
 }
 
 /* Utility functions */
+
 // Returns the nearest even number
 func nearestEvenNumber(n int) int {
 	return n - (n % 2)
