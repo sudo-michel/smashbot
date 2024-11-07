@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	"log"
+	"math"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -256,7 +257,9 @@ func createMatches(player []string) []Match {
 	var (
 		matches = []Match{}
 	)
-	evenCount := nearestEvenNumber(len(player))
+	evenCount := LargestPowerOfTwo(len(player))
+	log.Print("LargestPowerOfTwo : ", evenCount)
+	log.Print("len(player) : ", len(player))
 
 	for i := 0; i < evenCount; i += 2 {
 		matches = append(matches, Match{
@@ -390,8 +393,18 @@ func advanceToNextStage(tournament *Tournament, winner string) {
 
 /* Utility functions */
 // Returns the nearest even number
-func nearestEvenNumber(n int) int {
-	return n - (n % 2)
+func LargestPowerOfTwo(n int) int {
+	if n <= 0 {
+		return 0
+	}
+
+	power := int(math.Floor(math.Log2(float64(n))))
+
+	// Retourner 2^power
+	return int(math.Pow(2, float64(power)))
+
+	return power
+
 }
 
 // Sends an embed message to the specified channel
