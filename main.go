@@ -28,6 +28,7 @@ type Database struct {
 type Round struct {
 	Matches []Match `json:"matches"`
 }
+
 type Player struct {
 	ID       string `json:"id"`
 	Username string `json:"username"`
@@ -87,7 +88,6 @@ func loadDatabase() (*Database, error) {
 		log.Printf("Error unmarshalling database: %v", err)
 		return nil, fmt.Errorf("error unmarshalling database: %w", err)
 	}
-
 	if db.Players == nil {
 		db.Players = []Player{}
 	}
@@ -97,7 +97,6 @@ func loadDatabase() (*Database, error) {
 	if db.Tournaments == nil {
 		db.Tournaments = []Tournament{}
 	}
-
 	log.Println("Database loaded successfully")
 	return &db, nil
 }
@@ -109,13 +108,11 @@ func saveDatabase(db Database) error {
 		log.Printf("Error marshalling database: %v", err)
 		return fmt.Errorf("error marshalling database: %w", err)
 	}
-
 	err = os.WriteFile("database.json", file, 0644)
 	if err != nil {
 		log.Printf("Error writing database file: %v", err)
 		return fmt.Errorf("error writing database file: %w", err)
 	}
-
 	log.Println("Database saved successfully")
 	return nil
 }
@@ -334,7 +331,6 @@ func updateMatchResult(db *Database, matchID string, winnerName string) error {
 				if match.Player1 != winnerName && match.Player2 != winnerName {
 					return fmt.Errorf("le gagnant doit être l'un des joueurs du match: %s ou %s", match.Player1, match.Player2)
 				}
-
 				db.Tournaments[len(db.Tournaments)-1].Rounds[j].Matches[k].Winner = winnerName
 				return updateTournament(db)
 			}
@@ -392,6 +388,7 @@ func advanceToNextStage(tournament *Tournament, winner string) {
 }
 
 /* Utility functions */
+
 // Returns the nearest even number
 func LargestPowerOfTwo(n int) int {
 	if n <= 0 {
