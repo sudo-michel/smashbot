@@ -155,11 +155,23 @@ func listPlayers(db *Database) string {
 	return playersList.String()
 }
 
+// Lists all players in the database
+func listTables(db *Database) string {
+	if len(db.Tables) == 0 {
+		return "No players"
+	}
+	var playersList strings.Builder
+	for i, Tables := range db.Tables {
+		playersList.WriteString(fmt.Sprintf("%d. %s\n", i+1, Tables.ID))
+	}
+	return playersList.String()
+}
+
 // Adds new table to database
 func addTable(db *Database, numTables int) error {
 	for i := 0; i < numTables; i++ {
 		newTable := Table{
-			ID:        uuid.New().String(),
+			ID:        strconv.Itoa(i),
 			Available: true,
 		}
 		db.Tables = append(db.Tables, newTable)
@@ -220,6 +232,7 @@ func startTournament(db *Database) error {
 
 	if len(db.Tables) == 0 {
 		return fmt.Errorf("aucune table disponible")
+
 	}
 
 	tournament := Tournament{
@@ -257,6 +270,8 @@ func createMatches(player []string) []Match {
 	evenCount := LargestPowerOfTwo(len(player))
 	log.Print("LargestPowerOfTwo : ", evenCount)
 	log.Print("len(player) : ", len(player))
+	//tableCountid := len(table)
+	//
 
 	for i := 0; i < evenCount; i += 2 {
 		matches = append(matches, Match{
@@ -397,9 +412,7 @@ func LargestPowerOfTwo(n int) int {
 
 	power := int(math.Floor(math.Log2(float64(n))))
 
-	// Retourner 2^power
 	return int(math.Pow(2, float64(power)))
-
 	return power
 
 }
@@ -517,6 +530,11 @@ func main() {
 				return
 			}
 			sendEmbed(s, m.ChannelID, "Succès", fmt.Sprintf("%d tables ajoutées avec succès!", numTables), 0x00FF00)
+
+		//pour lister les tables
+		case len(args) == 3 && args[1] == "list" && args[2] == "table":
+			tableList := listTables(db)
+			sendEmbed(s, m.ChannelID, "Liste des tables", tableList, 0x00FF00)
 
 		//pour démarrer un tournoi
 		case len(args) == 3 && args[1] == "tournament" && args[2] == "start":
