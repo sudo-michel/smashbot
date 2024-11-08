@@ -1,4 +1,5 @@
 package main
+
 import (
 	"encoding/json"
 	"fmt"
@@ -296,7 +297,7 @@ func createRound(tournament *Tournament, tables []Table) Round {
 	if len(tables) == 0 {
 		return round
 	}
-
+	// plus grand puissace de 2 puis groupe de 3 puis gestion en fonction
 	tableIndex := 0
 	currentStage := fmt.Sprintf("stage%d", tournament.CurrentRound+1)
 	nextStage := fmt.Sprintf("stage%d", tournament.CurrentRound+2)
