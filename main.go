@@ -294,12 +294,13 @@ func nextRound(db *Database) error {
 		return saveDatabase(*db)
 	}
 
+	nextRoundNumber := tournament.CurrentRound + 2
 	var nextMatches []Match
 	if tournament.IsFirstRound {
 		tournament.IsFirstRound = false
-		nextMatches = manageMatches(winners, db.Tables)
+		nextMatches = manageMatches(winners, db.Tables, nextRoundNumber)
 	} else {
-		nextMatches = manageMatches(winners, db.Tables)
+		nextMatches = manageMatches(winners, db.Tables, nextRoundNumber)
 	}
 
 	tournament.Rounds = append(tournament.Rounds, Round{
@@ -324,9 +325,12 @@ func firstRound(players []Player, tables []Table) []Match {
 	matchCounter := 1
 	tableIndex := 0
 
+	// Class A Matches: Main bracket matches
+	// These matches form the core of the tournament bracket
+	// Players in these matches are directly seeded into the winner's bracket
 	for i := 0; i < halfpowerofTwo; i += 2 {
 		match := Match{
-			ID:      strconv.Itoa(matchCounter),
+			ID:      fmt.Sprintf("R1M%d", matchCounter),
 			Player1: players[currentPlayerIndex].Username,
 			Player2: players[currentPlayerIndex+1].Username,
 			Winner:  "",
@@ -345,12 +349,16 @@ func firstRound(players []Player, tables []Table) []Match {
 	log.Print("Remaining Players : ", remainingPlayers)
 	pairsNeeded := remainingPlayers / 2
 	log.Print("Pairs Needed : ", pairsNeeded)
+
+	// Class B Matches: Secondary bracket matches
+	// These matches are for remaining pairs of players
+	// Winners will join the main bracket in the next round
 	for i := 0; i < pairsNeeded; i += 2 {
 		if currentPlayerIndex+1 >= totalPlayers {
 			break
 		}
 		match := Match{
-			ID:      strconv.Itoa(matchCounter),
+			ID:      fmt.Sprintf("R1M%d", matchCounter),
 			Player1: players[currentPlayerIndex].Username,
 			Player2: players[currentPlayerIndex+1].Username,
 			Winner:  "",
@@ -368,6 +376,9 @@ func firstRound(players []Player, tables []Table) []Match {
 	remainingForTriples := totalPlayers - currentPlayerIndex
 	log.Print("Remaining Players for triples : ", remainingForTriples)
 
+	// Class C Matches: Triple group matches
+	// These are mini-groups of 3 players each
+	// First two players fight, then winner faces the third player
 	for remainingForTriples >= 3 {
 		tripleGroup := []Player{
 			players[currentPlayerIndex],
@@ -376,17 +387,19 @@ func firstRound(players []Player, tables []Table) []Match {
 		}
 
 		match1 := Match{
-			ID:          strconv.Itoa(matchCounter),
+			ID:          fmt.Sprintf("R1M%d", matchCounter),
 			Player1:     tripleGroup[0].Username,
 			Player2:     tripleGroup[1].Username,
 			Winner:      "",
 			Classe:      "C",
-			NextmatchID: fmt.Sprintf("M%d", len(matches)+2),
+			NextmatchID: fmt.Sprintf("R1M%d", matchCounter+1),
 			TableID:     tables[tableIndex%len(tables)].ID,
 		}
+		matchCounter++
 
+		// Second match of the triple (Final match with waiting player)
 		match2 := Match{
-			ID:              strconv.Itoa(matchCounter),
+			ID:              fmt.Sprintf("R1M%d", matchCounter),
 			Player1:         tripleGroup[2].Username,
 			Player2:         "",
 			Winner:          "",
@@ -404,6 +417,9 @@ func firstRound(players []Player, tables []Table) []Match {
 
 	remainingPlayers = totalPlayers - currentPlayerIndex
 
+	// Class D Matches: Final remaining players
+	// Handles the last 1 or 2 players that don't fit in other categories
+	// Could be either a single match or an automatic advancement
 	if remainingPlayers > 0 {
 		log.Print("Remaining Players : ", remainingPlayers)
 		if remainingPlayers == 2 {
@@ -435,14 +451,14 @@ func firstRound(players []Player, tables []Table) []Match {
 	return matches
 }
 
-func manageMatches(winners []string, tables []Table) []Match {
+func manageMatches(winners []string, tables []Table, roundNumber int) []Match {
 	matches := []Match{}
 	matchCounter := 1
 
 	for i := 0; i < len(winners); i += 2 {
 		if i+1 < len(winners) {
 			match := Match{
-				ID:      strconv.Itoa(matchCounter),
+				ID:      fmt.Sprintf("R%dM%d", roundNumber, matchCounter),
 				Player1: winners[i],
 				Player2: winners[i+1],
 				Winner:  "",
@@ -493,11 +509,7 @@ func updateMatchResult(db *Database, matchID string, winnerName string) error {
 		for j, round := range tournament.Rounds {
 			for k, match := range round.Matches {
 				if match.ID == updateMatch.NextmatchID {
-					if match.Player1 == "" {
-						tournament.Rounds[j].Matches[k].Player1 = winnerName
-					} else {
-						tournament.Rounds[j].Matches[k].Player2 = winnerName
-					}
+					tournament.Rounds[j].Matches[k].Player2 = winnerName
 					nextMatchFound = true
 					break
 				}
