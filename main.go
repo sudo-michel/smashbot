@@ -546,22 +546,9 @@ func LargestPowerOfTwo(n int) int {
 
 }
 
-// Sends an embed message to the specified channel
-func sendEmbed(s *discordgo.Session, channelID, title, description string, color int) {
-	embed := &discordgo.MessageEmbed{
-		Title:       title,
-		Description: description,
-		Color:       color,
-	}
-	_, err := s.ChannelMessageSendEmbed(channelID, embed)
-	if err != nil {
-		log.Printf("Erreur lors de l'envoi de l'embed: %v", err)
-	}
-
-}
-
 func clearTournaments(db *Database) error {
 	db.Tournaments = []Tournament{}
+
 	return saveDatabase(*db)
 }
 func clearPlayers(db *Database) error {
@@ -579,125 +566,345 @@ func clearDatabase(db *Database) error {
 	return saveDatabase(*db)
 }
 
-func main() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Erreur lors du chargement du ficher .env")
+func registerCommands(s *discordgo.Session) {
+	log.Print("Registering commands...")
+
+	if s == nil || s.State == nil || s.State.User == nil {
+		log.Print("Session or user not found")
+		return
 	}
 
-	token := os.Getenv("DISCORD_BOT_TOKEN")
-	if token == "" {
-		log.Fatal("Le token du bot n'est pas défini dans le ficher .env")
+	commands := []*discordgo.ApplicationCommand{
+		{
+			Name:        "smashbot",
+			Description: "Commandes principales du bot Smashbot",
+			Type:        discordgo.ApplicationCommandType(1),
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Name:        "add",
+					Description: "Ajouter un joueur ou des tables",
+					Type:        discordgo.ApplicationCommandOptionSubCommandGroup,
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Name:        "player",
+							Description: "Ajouter un nouveau joueur",
+							Type:        discordgo.ApplicationCommandOptionSubCommand,
+							Options: []*discordgo.ApplicationCommandOption{
+								{
+									Name:        "username",
+									Description: "Nom du joueur",
+									Type:        discordgo.ApplicationCommandOptionString,
+									Required:    true,
+								},
+							},
+						},
+						{
+							Name:        "tables",
+							Description: "Ajouter des tables",
+							Type:        discordgo.ApplicationCommandOptionSubCommand,
+							Options: []*discordgo.ApplicationCommandOption{
+								{
+									Name:        "number",
+									Description: "Nombre de tables à ajouter",
+									Type:        discordgo.ApplicationCommandOptionInteger,
+									Required:    true,
+								},
+							},
+						},
+					},
+				},
+
+				{
+					Name:        "remove",
+					Description: "Supprimer un joueur ou des tables",
+					Type:        discordgo.ApplicationCommandOptionSubCommandGroup,
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Name:        "player",
+							Description: "Nom du joueur à supprimer",
+							Type:        discordgo.ApplicationCommandOptionSubCommand,
+							Options: []*discordgo.ApplicationCommandOption{
+								{
+									Name:        "username",
+									Description: "Nom du joueur",
+									Type:        discordgo.ApplicationCommandOptionString,
+									Required:    true,
+								},
+							},
+						},
+						{
+							Name:        "tables",
+							Description: "Supprimer des tables",
+							Type:        discordgo.ApplicationCommandOptionSubCommand,
+							Options: []*discordgo.ApplicationCommandOption{
+								{
+									Name:        "number",
+									Description: "Nombre de tables à supprimer",
+									Type:        discordgo.ApplicationCommandOptionInteger,
+									Required:    true,
+								},
+							},
+						},
+					},
+				},
+				{
+					Name:        "list",
+					Description: "Lister les joueurs ou les tables",
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Name:        "type",
+							Description: "Type d'élément à lister (player/table)",
+							Type:        discordgo.ApplicationCommandOptionString,
+							Required:    true,
+							Choices: []*discordgo.ApplicationCommandOptionChoice{
+								{
+									Name:  "Joueurs",
+									Value: "player",
+								},
+								{
+									Name:  "Tables",
+									Value: "table",
+								},
+							},
+						},
+					},
+				},
+				{
+					Name:        "tournament",
+					Description: "Gérer le tournoi",
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Name:        "action",
+							Description: "Action à effectuer (start/next/status)",
+							Type:        discordgo.ApplicationCommandOptionString,
+							Required:    true,
+							Choices: []*discordgo.ApplicationCommandOptionChoice{
+								{
+									Name:  "start",
+									Value: "start",
+								},
+								{
+									Name:  "next",
+									Value: "next",
+								},
+								{
+									Name:  "status",
+									Value: "status",
+								},
+							},
+						},
+					},
+				},
+				{
+					Name:        "match",
+					Description: "Gérer les résultats des matchs",
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Name:        "match_id",
+							Description: "ID du match",
+							Type:        discordgo.ApplicationCommandOptionString,
+							Required:    true,
+						},
+						{
+							Name:        "winner",
+							Description: "Nom du gagnant",
+							Type:        discordgo.ApplicationCommandOptionString,
+							Required:    true,
+						},
+					},
+				},
+				{
+					Name:        "clear",
+					Description: "Nettoyer la base de données",
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Name:        "type",
+							Description: "Type d'élément à nettoyer (tournament/player/table/ALL)",
+							Type:        discordgo.ApplicationCommandOptionString,
+							Required:    true,
+							Choices: []*discordgo.ApplicationCommandOptionChoice{
+								{
+									Name:  "tournament",
+									Value: "tournament",
+								},
+								{
+									Name:  "player",
+									Value: "player",
+								},
+								{
+									Name:  "table",
+									Value: "table",
+								},
+								{
+									Name:  "ALL",
+									Value: "ALL",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
 	}
 
-	sess, err := discordgo.New("Bot " + token)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	sess.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
-		if m.Author.ID == s.State.User.ID {
-			return
-		}
-
-		args := strings.Split(m.Content, " ")
-		if len(args) == 0 || args[0] != prefix {
-			return
-		}
-
-		if len(args) < 2 {
-			sendEmbed(s, m.ChannelID, "Erreur", "Commande incomplète. Utilisez !smashbot help pour voir les commandes disponibles.", 0xFF0000)
-			return
-		}
-
-		if args[1] == "hello" {
-			if _, err := s.ChannelMessageSend(m.ChannelID, "world!"); err != nil {
-				log.Printf("Erreur lors de l'envoi du message: %v", err)
-			}
-		}
-
-		db, err := loadDatabase()
+	// Enregistrer les commandes
+	for _, cmd := range commands {
+		_, err := s.ApplicationCommandCreate(s.State.User.ID, "", cmd)
 		if err != nil {
-			sendEmbed(s, m.ChannelID, "Erreur", "Erreur lors du chargement de la base de données", 0xFF0000)
+			log.Printf("Erreur lors de la création de la commande %v: %v", cmd.Name, err)
+		}
+	}
+	log.Println("Commands registered successfully!")
+}
+
+func sendInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCreate, title, description string, color int) {
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{
+				{
+					Title:       title,
+					Description: description,
+					Color:       color,
+				},
+			},
+		},
+	})
+}
+
+func handleCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.Type != discordgo.InteractionApplicationCommand {
+		return
+	}
+
+	data := i.ApplicationCommandData()
+	if data.Name != "smashbot" {
+		return
+	}
+
+	// Charger la base de données
+	db, err := loadDatabase()
+	if err != nil {
+		sendInteractionResponse(s, i, "Erreur", "Erreur lors du chargement de la base de données", 0xFF0000)
+		return
+	}
+
+	// Obtenir la sous-commande et ses options
+	if len(data.Options) == 0 {
+		sendInteractionResponse(s, i, "Erreur", "Commande invalide", 0xFF0000)
+		return
+	}
+
+	groupCmd := data.Options[0]
+
+	switch groupCmd.Name {
+	case "add":
+		if len(groupCmd.Options) == 0 {
+			sendInteractionResponse(s, i, "Erreur", "Options manquantes", 0xFF0000)
 			return
 		}
 
-		switch {
-		//pour ajouter un joueur
-		case len(args) >= 3 && args[1] == "add" && args[2] == "player":
-			if len(args) < 4 {
-				sendEmbed(s, m.ChannelID, "Erreur", "Usage: !smashbot help", 0xFF0000)
+		subCmd := groupCmd.Options[0]
+		switch subCmd.Name {
+		case "player":
+			if len(subCmd.Options) == 0 {
+				sendInteractionResponse(s, i, "Erreur", "Nom du joueur manquant", 0xFF0000)
 				return
 			}
-
+			username := subCmd.Options[0].StringValue()
 			newPlayer := Player{
 				ID:       uuid.New().String(),
-				Username: strings.Join(args[3:], " "),
+				Username: username,
 			}
-
 			err = addPlayer(db, newPlayer)
 			if err != nil {
-				sendEmbed(s, m.ChannelID, "Erreur", "Erreur lors de l'ajout du joueur: "+err.Error(), 0xFF0000)
+				sendInteractionResponse(s, i, "Erreur", "Erreur lors de l'ajout du joueur: "+err.Error(), 0xFF0000)
 				return
 			}
-			sendEmbed(s, m.ChannelID, "Succès", fmt.Sprintf("Joueur %s ajouté avec succès!", newPlayer.Username), 0x00FF00)
+			sendInteractionResponse(s, i, "Succès", fmt.Sprintf("Joueur %s ajouté avec succès!", newPlayer.Username), 0x00FF00)
 
-		//pour lister les joueurs
-		case len(args) == 3 && args[1] == "list" && args[2] == "player":
-			playerList := listPlayers(db)
-			sendEmbed(s, m.ChannelID, "Liste des joueurs", playerList, 0x00FF00)
-
-		//pour supprimer un joueur
-		case len(args) >= 3 && args[1] == "remove" && args[2] == "player":
-			if len(args) < 4 {
-				sendEmbed(s, m.ChannelID, "Erreur", "Usage: !smashbot help", 0xFF0000)
+		case "tables":
+			if len(subCmd.Options) == 0 {
+				sendInteractionResponse(s, i, "Erreur", "Nombre de tables manquant", 0xFF0000)
 				return
 			}
-			username := strings.Join(args[3:], " ")
-			err = removePlayer(db, username)
-			if err != nil {
-				sendEmbed(s, m.ChannelID, "Erreur", "Erreur lors de l'ajout du joueur: "+err.Error(), 0xFF0000)
-				return
-			}
-			sendEmbed(s, m.ChannelID, "Succès", fmt.Sprintf("Joueur %s supprimé avec succès!", username), 0x00FF00)
-
-		// add a tables
-		case args[1] == "add" && args[2] == "tables":
-			if len(args) != 4 {
-				sendEmbed(s, m.ChannelID, "Erreur", "Usage: !smashbot help", 0xFF0000)
-				return
-			}
-			numTables, err := strconv.Atoi(args[3])
-			if err != nil {
-				sendEmbed(s, m.ChannelID, "Erreur", "Nombre de tables invalide", 0xFF0000)
-				return
-			}
+			numTables := int(subCmd.Options[0].IntValue())
 			err = addTable(db, numTables)
 			if err != nil {
-				sendEmbed(s, m.ChannelID, "Erreur", "Erreur lors de l'ajout des tables : "+err.Error(), 0xFF0000)
+				sendInteractionResponse(s, i, "Erreur", "Erreur lors de l'ajout des tables: "+err.Error(), 0xFF0000)
 				return
 			}
-			sendEmbed(s, m.ChannelID, "Succès", fmt.Sprintf("%d tables ajoutées avec succès!", numTables), 0x00FF00)
+			sendInteractionResponse(s, i, "Succès", fmt.Sprintf("%d tables ajoutées avec succès!", numTables), 0x00FF00)
+		}
 
-		//pour lister les tables
-		case len(args) == 3 && args[1] == "list" && args[2] == "table":
-			tableList := listTables(db)
-			sendEmbed(s, m.ChannelID, "Liste des tables", tableList, 0x00FF00)
+	case "remove":
+		if len(groupCmd.Options) == 0 {
+			sendInteractionResponse(s, i, "Erreur", "Options manquantes", 0xFF0000)
+			return
+		}
 
-		//pour démarrer un tournoi
-		case len(args) == 3 && args[1] == "tournament" && args[2] == "start":
+		subCmd := groupCmd.Options[0]
+		switch subCmd.Name {
+		case "player":
+			if len(subCmd.Options) == 0 {
+				sendInteractionResponse(s, i, "Erreur", "Nom du joueur manquant", 0xFF0000)
+				return
+			}
+			username := subCmd.Options[0].StringValue()
+			err = removePlayer(db, username)
+			if err != nil {
+				sendInteractionResponse(s, i, "Erreur", "Erreur lors de la suppression du joueur: "+err.Error(), 0xFF0000)
+				return
+			}
+			sendInteractionResponse(s, i, "Succès", fmt.Sprintf("Joueur %s supprimé avec succès!", username), 0x00FF00)
+
+		case "tables":
+			if len(subCmd.Options) == 0 {
+				sendInteractionResponse(s, i, "Erreur", "Nombre de tables manquant", 0xFF0000)
+				return
+			}
+			numTables := int(subCmd.Options[0].IntValue())
+			err = removeTables(db, numTables)
+			if err != nil {
+				sendInteractionResponse(s, i, "Erreur", "Erreur lors de la suppression des tables: "+err.Error(), 0xFF0000)
+				return
+			}
+			sendInteractionResponse(s, i, "Succès", fmt.Sprintf("%d tables supprimées avec succès!", numTables), 0x00FF00)
+		}
+
+	case "list":
+		if len(groupCmd.Options) == 0 {
+			sendInteractionResponse(s, i, "Erreur", "Type de liste manquant", 0xFF0000)
+			return
+		}
+		listType := groupCmd.Options[0].StringValue()
+		var list string
+		switch listType {
+		case "player":
+			list = listPlayers(db)
+		case "table":
+			list = listTables(db)
+		}
+		sendInteractionResponse(s, i, fmt.Sprintf("Liste des %s", listType), list, 0x00FF00)
+
+	case "tournament":
+		if len(groupCmd.Options) == 0 {
+			sendInteractionResponse(s, i, "Erreur", "Action manquante", 0xFF0000)
+			return
+		}
+		action := groupCmd.Options[0].StringValue()
+		switch action {
+		case "start":
 			err := startTournament(db)
 			if err != nil {
-				sendEmbed(s, m.ChannelID, "Erreur", "Erreur lors du démarrage du tournoi : "+err.Error(), 0xFF0000)
+				sendInteractionResponse(s, i, "Erreur", "Erreur lors du démarrage du tournoi: "+err.Error(), 0xFF0000)
 				return
 			}
-
 			tournament := getCurrentTournament(db)
-			if tournament == nil {
-				sendEmbed(s, m.ChannelID, "Erreur", "Erreur lors de la récupération du tournoi", 0xFF0000)
-				return
-			}
-
 			var matchesInfo strings.Builder
 			matchesInfo.WriteString(fmt.Sprintf("Tournoi ID: %s\n\n", tournament.ID))
 			matchesInfo.WriteString("Liste des joueurs:\n")
@@ -706,168 +913,105 @@ func main() {
 			}
 			matchesInfo.WriteString("\nMatches du premier tour:\n")
 			for _, match := range tournament.Rounds[0].Matches {
-				if match.Player2 != "" {
-					matchesInfo.WriteString(fmt.Sprintf("Match ID: %s - %s vs %s (Table: %s)\n",
-						match.ID, match.Player1, match.Player2, match.TableID))
-				} else {
-					matchesInfo.WriteString(fmt.Sprintf("Match ID: %s - %s passe automatiquement (Table: %s)\n",
-						match.ID, match.Player1, match.TableID))
-				}
+				matchesInfo.WriteString(fmt.Sprintf("Match %s: %s vs %s (Table: %s)\n",
+					match.ID, match.Player1, match.Player2, match.TableID))
 			}
+			sendInteractionResponse(s, i, "Tournoi démarré", matchesInfo.String(), 0x00FF00)
 
-			sendEmbed(s, m.ChannelID, "Tournoi démarré", matchesInfo.String(), 0x00FF00)
-
-		//pour mettre à jour le résultat d'un match
-		case len(args) == 5 && args[1] == "match" && args[2] == "result":
-			matchID := args[3]
-			winnerName := args[4]
-			err := updateMatchResult(db, matchID, winnerName)
-			if err != nil {
-				sendEmbed(s, m.ChannelID, "Erreur", "Erreur lors de la mise à jour du résultat : "+err.Error(), 0xFF0000)
-				return
-			}
-			sendEmbed(s, m.ChannelID, "Succès", "Résultat du match mis à jour avec succès!", 0x00FF00)
-
-		//pour afficher l'état du tournoi
-		case len(args) == 3 && args[1] == "tournament" && args[2] == "status":
+		case "status":
 			status := getTournamentStatus(*db)
-			sendEmbed(s, m.ChannelID, "État du tournoi", status, 0x00FF00)
+			sendInteractionResponse(s, i, "État du tournoi", status, 0x00FF00)
 
-			// remove a tables
-		case args[1] == "remove" && args[2] == "tables":
-			if len(args) != 4 {
-				sendEmbed(s, m.ChannelID, "Erreur", "Usage: !smashbot help", 0xFF0000)
-				return
-			}
-			numTables, err := strconv.Atoi(args[3])
-			if err != nil {
-				sendEmbed(s, m.ChannelID, "Erreur", "Nombre de tables invalide", 0xFF0000)
-				return
-			}
-			err = removeTables(db, numTables)
-			if err != nil {
-				sendEmbed(s, m.ChannelID, "Erreur", "Erreur lors de la suppréssion des tables : "+err.Error(), 0xFF0000)
-				return
-			}
-			sendEmbed(s, m.ChannelID, "Succès", fmt.Sprintf("%d tables supprimer avec succès!", numTables), 0x00FF00)
-
-		/*Clear database */
-
-		case len(args) == 3 && args[1] == "clear" && args[2] == "tournament":
-			err := clearTournaments(db)
-			if err != nil {
-				sendEmbed(s, m.ChannelID, "Erreur", "Erreur lors du nettoyage des tournois : "+err.Error(), 0xFF0000)
-				return
-			}
-			sendEmbed(s, m.ChannelID, "Succès", "Tous les tournois ont été supprimés!", 0x00FF00)
-
-		case len(args) == 3 && args[1] == "clear" && args[2] == "player":
-			err := clearPlayers(db)
-			if err != nil {
-				sendEmbed(s, m.ChannelID, "Erreur", "Erreur lors du nettoyage des joueurs : "+err.Error(), 0xFF0000)
-				return
-			}
-			sendEmbed(s, m.ChannelID, "Succès", "Tous les joueurs ont été supprimés!", 0x00FF00)
-
-		case len(args) == 3 && args[1] == "clear" && args[2] == "table":
-			err := clearTables(db)
-			if err != nil {
-				sendEmbed(s, m.ChannelID, "Erreur", "Erreur lors du nettoyage des tables : "+err.Error(), 0xFF0000)
-				return
-			}
-			sendEmbed(s, m.ChannelID, "Succès", "Toutes les tables ont été supprimées!", 0x00FF00)
-
-		case len(args) == 3 && args[1] == "clear" && args[2] == "ALL":
-			err := clearDatabase(db)
-			if err != nil {
-				sendEmbed(s, m.ChannelID, "Erreur", "Erreur lors du nettoyage de la base de données : "+err.Error(), 0xFF0000)
-				return
-			}
-			sendEmbed(s, m.ChannelID, "Succès", "La base de données a été entièrement nettoyée!", 0x00FF00)
-
-		//pour passer au tour suivant
-		case len(args) == 3 && args[1] == "tournament" && args[2] == "next":
+		case "next":
 			err := nextRound(db)
 			if err != nil {
-				sendEmbed(s, m.ChannelID, "Erreur", "Erreur lors du passage au tour suivant : "+err.Error(), 0xFF0000)
+				sendInteractionResponse(s, i, "Erreur", "Erreur lors du passage au tour suivant: "+err.Error(), 0xFF0000)
 				return
 			}
-
 			tournament := getCurrentTournament(db)
 			if tournament.Status == TournamentStatusComplete {
-				// Trouver le gagnant final
 				lastRound := tournament.Rounds[len(tournament.Rounds)-1]
 				winner := lastRound.Matches[0].Winner
-				sendEmbed(s, m.ChannelID, "Tournoi terminé!", fmt.Sprintf("Le tournoi est terminé! Le gagnant est : %s", winner), 0x00FF00)
-			} else {
-				// Afficher les nouveaux matches
-				var matchesInfo strings.Builder
-				currentRound := tournament.Rounds[tournament.CurrentRound]
-				matchesInfo.WriteString(fmt.Sprintf("Tour %d :\n", tournament.CurrentRound+1))
-				for _, match := range currentRound.Matches {
-					if match.Player2 != "" {
-						matchesInfo.WriteString(fmt.Sprintf("Match ID: %s - %s vs %s (Table: %s)\n",
-							match.ID, match.Player1, match.Player2, match.TableID))
-					} else {
-						matchesInfo.WriteString(fmt.Sprintf("Match ID: %s - %s passe automatiquement (Table: %s)\n",
-							match.ID, match.Player1, match.TableID))
-					}
-				}
-				sendEmbed(s, m.ChannelID, "Nouveau tour commencé", matchesInfo.String(), 0x00FF00)
+				sendInteractionResponse(s, i, "Tournoi terminé!", fmt.Sprintf("Le tournoi est terminé! Le gagnant est : %s", winner), 0x00FF00)
 			}
-
-		//pour afficher l'aide
-		case len(args) == 2 && args[1] == "help":
-			helpMessage := `Commandes disponibles:
-Gestion des joueurs:
-  !smashbot add player <username>    : Ajoute un nouveau joueur
-  !smashbot remove player <username> : Supprime un joueur existant
-  !smashbot list player              : Affiche la liste des joueurs
-  !smashbot clear player             : Supprime tous les joueurs
-
-Gestion des tables:
-  !smashbot add tables <number>    : Ajoute un certain nombre de tables
-  !smashbot remove tables <number> : Supprime un certain nombre de tables
-  !smashbot clear table            : Supprime toutes les tables
-
-Gestion des tournois:
-  !smashbot tournament start : Démarre un nouveau tournoi
-  !smashbot tournament next : Passe au tour suivant
-  !smashbot match result <match_id> <winner_name> : Enregistre le résultat d'un match
-  !smashbot clear tournament : Supprime tous les tournois
-
-Nettoyage global:
-  !smashbot clear ALL: Vide entièrement la base de données
-
-Autres:
-  !smashbot help  : Affiche ce message d'aide
-
-Note: Assurez-vous d'utiliser les IDs appropriés pour les tournois, tables et joueurs lors de l'utilisation des commandes.`
-
-			sendEmbed(s, m.ChannelID, "Aide", helpMessage, 0x00FF00)
-		default:
-			sendEmbed(s, m.ChannelID, "Erreur", "Commande non reconnue. Utilisez !smashbot help", 0xFF0000)
 		}
 
+	case "match":
+		if len(groupCmd.Options) < 2 {
+			sendInteractionResponse(s, i, "Erreur", "ID du match et gagnant requis", 0xFF0000)
+			return
+		}
+		matchID := groupCmd.Options[0].StringValue()
+		winnerName := groupCmd.Options[1].StringValue()
+		err := updateMatchResult(db, matchID, winnerName)
+		if err != nil {
+			sendInteractionResponse(s, i, "Erreur", "Erreur lors de la mise à jour du résultat: "+err.Error(), 0xFF0000)
+			return
+		}
+		sendInteractionResponse(s, i, "Succès", "Résultat du match mis à jour avec succès!", 0x00FF00)
+
+	case "clear":
+		if len(groupCmd.Options) == 0 {
+			sendInteractionResponse(s, i, "Erreur", "Type de nettoyage requis", 0xFF0000)
+			return
+		}
+		clearType := groupCmd.Options[0].StringValue()
+		var err error
+		switch clearType {
+		case "tournament":
+			err = clearTournaments(db)
+		case "player":
+			err = clearPlayers(db)
+		case "table":
+			err = clearTables(db)
+		case "ALL":
+			err = clearDatabase(db)
+		}
+		if err != nil {
+			sendInteractionResponse(s, i, "Erreur", fmt.Sprintf("Erreur lors du nettoyage: %v", err), 0xFF0000)
+			return
+		}
+		sendInteractionResponse(s, i, "Succès", "Nettoyage effectué avec succès!", 0x00FF00)
+	}
+}
+
+func main() {
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Erreur lors du chargement du fichier .env")
+	}
+
+	token := os.Getenv("DISCORD_BOT_TOKEN")
+	if token == "" {
+		log.Fatal("Le token du bot n'est pas défini dans le fichier .env")
+	}
+
+	sess, err := discordgo.New("Bot " + token)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Ajouter le handler pour les commandes slash
+	sess.AddHandler(func(s *discordgo.Session, r *discordgo.Ready) {
+		log.Printf("Bot is ready! Logged in as: %v#%v", s.State.User.Username, s.State.User.Discriminator)
+		// Enregistrer les commandes slash une fois que le bot est prêt
+		registerCommands(s)
 	})
 
-	sess.Identify.Intents = discordgo.IntentsAllWithoutPrivileged
+	sess.AddHandler(handleCommands)
+
+	// Définir les intents nécessaires
+	sess.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsGuildIntegrations
 
 	err = sess.Open()
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer func(sess *discordgo.Session) {
-		err := sess.Close()
-		if err != nil {
+	defer sess.Close()
 
-		}
-	}(sess)
-
-	log.Print("the bot run")
+	log.Print("Bot is running")
 
 	sc := make(chan os.Signal, 1)
-
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 	<-sc
 }
