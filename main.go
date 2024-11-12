@@ -32,7 +32,6 @@ type Round struct {
 type Player struct {
 	ID       string `json:"id"`
 	Username string `json:"username"`
-	Classe   string `json:"classe"`
 }
 
 type Table struct {
@@ -281,12 +280,20 @@ func nextRound(db *Database) error {
 
 	currentRound := tournament.Rounds[tournament.CurrentRound]
 	winners := []string{}
-	for _, match := range currentRound.Matches {
-		if match.Winner == "" {
-			return fmt.Errorf("tous les matches du tour actuel ne sont pas terminés")
 
+	// Vérifier tous les matchs d'abord
+	for _, match := range currentRound.Matches {
+		if match.Player2 == "" {
+			if match.Winner == "" {
+				match.Winner = match.Player1
+			}
+			winners = append(winners, match.Winner)
+		} else {
+			if match.Winner == "" {
+				return fmt.Errorf("le match %s n'est pas terminé", match.ID)
+			}
+			winners = append(winners, match.Winner)
 		}
-		winners = append(winners, match.Winner)
 	}
 
 	if len(winners) == 1 {
@@ -296,6 +303,7 @@ func nextRound(db *Database) error {
 
 	nextRoundNumber := tournament.CurrentRound + 2
 	var nextMatches []Match
+
 	if tournament.IsFirstRound {
 		tournament.IsFirstRound = false
 		nextMatches = manageMatches(winners, db.Tables, nextRoundNumber)
@@ -313,47 +321,31 @@ func nextRound(db *Database) error {
 // Creates matches for the first round of the tournament
 func firstRound(players []Player, tables []Table) []Match {
 	totalPlayers := len(players)
-	powerofTwo := LargestPowerOfTwo(totalPlayers)
-	halfpowerofTwo := powerofTwo / 2
+	targetSize := LargestPowerOfTwo(totalPlayers) / 2
+	matchesNeeded := targetSize
 
-	log.Print("Total Players : ", totalPlayers)
-	log.Print("Power of Two : ", powerofTwo)
-	log.Print("Half Power of Two : ", halfpowerofTwo)
+	log.Printf("Total Players: %d", totalPlayers)
+	log.Printf("Target Size for next round: %d", targetSize)
+	log.Printf("Matches needed: %d", matchesNeeded)
 
-	currentPlayerIndex := 0
 	matches := []Match{}
-	matchCounter := 1
+	currentPlayerIndex := 0
+	//remainingPlayers := totalPlayers
 	tableIndex := 0
 
-	// Class A Matches: Main bracket matches
-	// These matches form the core of the tournament bracket
-	// Players in these matches are directly seeded into the winner's bracket
-	for i := 0; i < halfpowerofTwo; i += 2 {
-		match := Match{
-			ID:      fmt.Sprintf("R1M%d", matchCounter),
-			Player1: players[currentPlayerIndex].Username,
-			Player2: players[currentPlayerIndex+1].Username,
-			Winner:  "",
-			Classe:  "A",
-			TableID: tables[tableIndex%len(tables)].ID,
-		}
-		players[currentPlayerIndex].Classe = "A"
-		players[currentPlayerIndex+1].Classe = "A"
-		matches = append(matches, match)
-		matchCounter++
-		tableIndex++
-		currentPlayerIndex += 2
+	playerInMatches := (totalPlayers - targetSize) * 2
+	if playerInMatches < 0 {
+		playerInMatches = totalPlayers - (totalPlayers % 2)
 	}
+	byePlayers := totalPlayers - playerInMatches
 
-	remainingPlayers := totalPlayers - halfpowerofTwo
-	log.Print("Remaining Players : ", remainingPlayers)
-	pairsNeeded := remainingPlayers / 2
-	log.Print("Pairs Needed : ", pairsNeeded)
+	log.Print("Players in matches : ", playerInMatches)
+	log.Print("Bye Players : ", byePlayers)
 
-	// Class B Matches: Secondary bracket matches
-	// These matches are for remaining pairs of players
-	// Winners will join the main bracket in the next round
-	for i := 0; i < pairsNeeded; i += 2 {
+	matchCounter := 1
+	matchesCreated := 0
+
+	for matchesCreated < playerInMatches/2 {
 		if currentPlayerIndex+1 >= totalPlayers {
 			break
 		}
@@ -362,90 +354,32 @@ func firstRound(players []Player, tables []Table) []Match {
 			Player1: players[currentPlayerIndex].Username,
 			Player2: players[currentPlayerIndex+1].Username,
 			Winner:  "",
-			Classe:  "B",
 			TableID: tables[tableIndex%len(tables)].ID,
 		}
-		players[currentPlayerIndex].Classe = "B"
-		players[currentPlayerIndex+1].Classe = "B"
 		matches = append(matches, match)
-		tableIndex++
-		matchCounter++
 		currentPlayerIndex += 2
-	}
-
-	remainingForTriples := totalPlayers - currentPlayerIndex
-	log.Print("Remaining Players for triples : ", remainingForTriples)
-
-	// Class C Matches: Triple group matches
-	// These are mini-groups of 3 players each
-	// First two players fight, then winner faces the third player
-	for remainingForTriples >= 3 {
-		tripleGroup := []Player{
-			players[currentPlayerIndex],
-			players[currentPlayerIndex+1],
-			players[currentPlayerIndex+2],
-		}
-
-		match1 := Match{
-			ID:          fmt.Sprintf("R1M%d", matchCounter),
-			Player1:     tripleGroup[0].Username,
-			Player2:     tripleGroup[1].Username,
-			Winner:      "",
-			Classe:      "C",
-			NextmatchID: fmt.Sprintf("R1M%d", matchCounter+1),
-			TableID:     tables[tableIndex%len(tables)].ID,
-		}
 		matchCounter++
-
-		// Second match of the triple (Final match with waiting player)
-		match2 := Match{
-			ID:              fmt.Sprintf("R1M%d", matchCounter),
-			Player1:         tripleGroup[2].Username,
-			Player2:         "",
-			Winner:          "",
-			Classe:          "C",
-			TableID:         tables[tableIndex%len(tables)].ID,
-			WaitingForMatch: match1.ID,
-		}
-		matchCounter++
+		matchesCreated++
 		tableIndex++
 
-		matches = append(matches, match1, match2)
-		currentPlayerIndex += 3
-		remainingForTriples -= 3
 	}
 
-	remainingPlayers = totalPlayers - currentPlayerIndex
-
-	// Class D Matches: Final remaining players
-	// Handles the last 1 or 2 players that don't fit in other categories
-	// Could be either a single match or an automatic advancement
-	if remainingPlayers > 0 {
-		log.Print("Remaining Players : ", remainingPlayers)
-		if remainingPlayers == 2 {
-			match := Match{
-				ID:      strconv.Itoa(matchCounter),
-				Player1: players[currentPlayerIndex].Username,
-				Player2: players[currentPlayerIndex+1].Username,
-				Winner:  "",
-				Classe:  "D",
-				TableID: tables[tableIndex%len(tables)].ID,
-			}
-			matches = append(matches, match)
-			matchCounter++
-
-		} else if remainingPlayers == 1 {
-			match := Match{
-				ID:      strconv.Itoa(matchCounter),
-				Player1: players[currentPlayerIndex].Username,
-				Player2: "",
-				Winner:  players[currentPlayerIndex].Username,
-				Classe:  "D",
-				TableID: tables[tableIndex%len(tables)].ID,
-			}
-			matches = append(matches, match)
-			matchCounter++
+	for i := 0; i < byePlayers; i++ {
+		if currentPlayerIndex >= len(players) {
+			break
 		}
+
+		match := Match{
+			ID:      fmt.Sprintf("R1M%d", matchCounter),
+			Player1: players[currentPlayerIndex].Username,
+			Player2: "",
+			Winner:  players[currentPlayerIndex].Username, // Le joueur passe automatiquement
+			TableID: "",                                   // Pas besoin de table pour un bye
+		}
+
+		matches = append(matches, match)
+		currentPlayerIndex++
+		matchCounter++
 	}
 
 	return matches
@@ -537,12 +471,10 @@ func (t *Tournament) addPlayerToStage(stageName string, playerName string) {
 // Returns the nearest even number
 func LargestPowerOfTwo(n int) int {
 	if n <= 0 {
-		return 0
+		return 1
 	}
-
-	power := int(math.Floor(math.Log2(float64(n))))
-
-	return int(math.Pow(2, float64(power)))
+	power := math.Ceil(math.Log2(float64(n)))
+	return int(math.Pow(2, power))
 
 }
 
@@ -928,12 +860,30 @@ func handleCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				sendInteractionResponse(s, i, "Erreur", "Erreur lors du passage au tour suivant: "+err.Error(), 0xFF0000)
 				return
 			}
+
 			tournament := getCurrentTournament(db)
 			if tournament.Status == TournamentStatusComplete {
 				lastRound := tournament.Rounds[len(tournament.Rounds)-1]
 				winner := lastRound.Matches[0].Winner
 				sendInteractionResponse(s, i, "Tournoi terminé!", fmt.Sprintf("Le tournoi est terminé! Le gagnant est : %s", winner), 0x00FF00)
+				return
 			}
+
+			currentRound := tournament.Rounds[tournament.CurrentRound]
+			var matchesInfo strings.Builder
+			matchesInfo.WriteString(fmt.Sprintf("Tour %d:\n\n", tournament.CurrentRound+1))
+
+			for _, match := range currentRound.Matches {
+				if match.Player2 == "" {
+					matchesInfo.WriteString(fmt.Sprintf("Match %s: %s passe automatiquement\n",
+						match.ID, match.Player1))
+				} else {
+					matchesInfo.WriteString(fmt.Sprintf("Match %s: %s vs %s (Table: %s)\n",
+						match.ID, match.Player1, match.Player2, match.TableID))
+				}
+			}
+
+			sendInteractionResponse(s, i, "Nouveau tour commencé", matchesInfo.String(), 0x00FF00)
 		}
 
 	case "match":
