@@ -1,57 +1,131 @@
-Description complète du bot SmashBot:
-1. Gestion des joueurs:
-   * Ajouter un joueur: !smashbot add player <username>
-   * Supprimer un joueur: !smashbot remove player <username>
-   * Lister les joueurs: !smashbot list players
-2. Gestion des tables:
-   * Ajouter une table: !smashbot add table
-   * Supprimer une table: !smashbot remove table
-   * Lister les tables: !smashbot list tables
-3. Gestion du tournoi:
-   * Démarrer un tournoi: !smashbot tournament start
-   * Afficher l'état du tournoi: !smashbot tournament status
-   * Enregistrer le résultat d'un match: !smashbot match result <match_id> <winner_name>
-4. Système de tournoi:
-   * Crée des matchs initiaux en utilisant toutes les tables disponibles.
-   * Les gagnants sont automatiquement mis en match contre d'autres gagnants.
-   * Priorité aux joueurs n'ayant pas encore joué leur match pour accedé au meme niveau que les autre gagnant (ex on fait d'abord tout les 8e de final si une person est seul est pass en quart et une fois que tout le monde est en quart peux faire les match des quart de final et ainsi de suis jusqua la final).
-   * En cas de nombre impair de joueurs, le joueur seul passe automatiquement au niveau suivant.
+# SmashBot
+
+A Discord bot designed to manage tournaments.
+
+## Features
+
+- Tournament Management
+- Player Registration
+- Table Management
+- Match Result Tracking
+- Double Elimination Brackets
+- Automatic Table Assignment
+
+## Prerequisites
+
+- Go 1.20 or higher
+- Discord Bot Token
+- Discord Developer Account
+
+## Installation
+
+1. Clone the repository
+```bash
+git clone https://github.com/yourusername/smashbot.git
+cd smashbot
+```
+
+2. Install dependencies
+```bash
+go mod download
+```
+
+3. Create a .env file with your Discord bot token
+```bash
+DISCORD_BOT_TOKEN=your_token_here
+```
+
+4. Build and run
+```bash
+go run .
+```
+
+## Commands
+
+### Tournament Management
+- `/smashbot tournament start` - Start a new tournament
+- `/smashbot tournament next` - Move to next round
+- `/smashbot tournament status` - Display current tournament status
+
+### Match Management
+- `/smashbot match [match_id] [winner]` - Update match results with winner
+
+### Player Management
+- `/smashbot add player [username]` - Add new player to database
+- `/smashbot remove player [username]` - Remove player from database
+- `/smashbot list player` - Display all registered players
+
+### Table Management
+- `/smashbot add tables [number]` - Add tables to venue
+- `/smashbot remove tables [number]` - Remove tables from venue
+- `/smashbot list table` - Display all available tables
+
+### Database Management
+- `/smashbot clear [type]` - Clear specified data (tournament/player/table/ALL)
+- `/smashbot confirm-clear [code] [type]` - Confirm clearing with security code
+
+### Help
+- `/smashbot help` - Display all available commands
+
+## Database Structure
+
+The bot uses a JSON file (`database.json`) to store all data:
+- Players: List of registered players
+- Tables: Available tables for matches
+- Tournaments: Tournament data including matches and rounds
+
+## Tournament System
+
+The tournament system follows these rules:
+1. Requires minimum 2 players to start
+2. Automatically creates first round matches
+3. Assigns available tables to matches
+4. Tracks match results
+5. Generates next round matches automatically
+6. Determines tournament winner
 
 
+## Customization
 
-Initialisation du tournoi :
-a. Déterminer la plus grande puissance de 2 inférieure ou égale au nombre de joueurs.
-b. Créer des matchs réguliers pour cette puissance de 2.
-c. Gérer les joueurs restants en mini-tournois.
-Création des matchs :
-a. Matchs réguliers :
+### Change Bot Name and Command Prefix
+1. Go to the [Discord Developer Portal](https://discord.com/developers/applications)
+2. Select your application
+3. Click on "Bot" in the left sidebar
+4. Under "Username", click the "Edit" button
+5. Enter the new name for your bot
+6. Click "Save Changes"
 
-Créer des paires de joueurs pour des matchs directs.
-Le nombre de ces matchs sera la moitié de la puissance de 2 trouvée.
+### Change Command Prefix
+To change the command prefix (default is "smashbot"), modify the following in the code:
 
-b. Mini-tournois :
+1. Find the constant at the top of the file:
+```go
+const (
+    BOT_COMMAND_PREFIX string = "smashbot"
+)
+```
 
-Pour chaque groupe de 3 joueurs restants, créer un mini-tournoi.
-Si le nombre de joueurs restants n'est pas divisible par 3, le(s) dernier(s) joueur(s) forme(nt) un match direct ou obtient un "bye".
+2. Change it to your desired prefix:
+```go
+const (
+    BOT_COMMAND_PREFIX string = "yourprefix"
+)
+```
 
+No other changes are needed - the code uses this constant throughout. After changing:
+- Your bot will respond to `/yourprefix` instead of `/smashbot`
+- All commands will use the new prefix (e.g., `/yourprefix tournament start`)
+- The help message will automatically show the new prefix
 
-Structure d'un mini-tournoi :
+Note: After changing the prefix:
+1. Restart the bot for changes to take effect
+2. The old commands will be automatically removed
+3. New commands with the new prefix will be registered
 
-Premier match : Joueur A vs Joueur B
-Deuxième match : Gagnant (A vs B) contre Joueur C
+Example of commands with new prefix 'tournamentbot':
+```
+/tournamentbot help
+/tournamentbot tournament start
+/tournamentbot add player
+```
 
-
-Déroulement du tournoi :
-a. Jouer tous les matchs réguliers du tour actuel.
-b. Pour chaque mini-tournoi :
-
-Jouer le premier match.
-Une fois le résultat connu, créer et jouer le deuxième match.
-c. Si présent, jouer le match direct des joueurs restants.
-
-
-Progression au tour suivant :
-a. Collecter tous les gagnants des matchs réguliers.
-b. Ajouter les gagnants finaux de chaque mini-tournoi.
-c. Inclure le gagnant du match direct des joueurs restants, s'il y en a un.
-d. Si un joueur a reçu un "bye", l'inclure directement.
