@@ -16,8 +16,6 @@ import (
 	"syscall"
 )
 
-const prefix string = "!smashbot"
-
 // Basic structure that stores all data
 type Database struct {
 	Players     []Player     `json:"players"`
@@ -41,14 +39,13 @@ type Table struct {
 }
 
 type Tournament struct {
-	ID           string                     `json:"id"`
-	Matches      []Match                    `json:"matches"`
-	Rounds       []Round                    `json:"rounds"`
-	Players      []string                   `json:"player_ids"`
-	Status       TournamentStatus           `json:"status"`
-	CurrentRound int                        `json:"current_round"`
-	Stages       map[string]map[string]bool `json:"stages"`
-	IsFirstRound bool                       `json:"is_first_round"`
+	ID           string           `json:"id"`
+	Matches      []Match          `json:"matches"`
+	Rounds       []Round          `json:"rounds"`
+	Players      []string         `json:"player_ids"`
+	Status       TournamentStatus `json:"status"`
+	CurrentRound int              `json:"current_round"`
+	IsFirstRound bool             `json:"is_first_round"`
 }
 
 type Match struct {
@@ -64,6 +61,13 @@ type Match struct {
 }
 
 type TournamentStatus string
+
+var securityCodes = map[string]int{
+	"tournament": 0,
+	"player":     0,
+	"table":      0,
+	"ALL":        0,
+}
 
 const (
 	TournamentStatusPending  TournamentStatus = "pending"
@@ -125,13 +129,14 @@ func saveDatabase(db Database) error {
 
 // Adds new player to database
 func addPlayer(db *Database, player Player) error {
-	// Vérifier si le joueur existe déjà
+	// Check if player already exists
 	for _, p := range db.Players {
 		if p.Username == player.Username {
 			return fmt.Errorf("player already exists")
 		}
 	}
 	db.Players = append(db.Players, player)
+	log.Print("Player added successfully")
 	return saveDatabase(*db)
 }
 
@@ -139,11 +144,12 @@ func addPlayer(db *Database, player Player) error {
 func removePlayer(db *Database, username string) error {
 	for i, p := range db.Players {
 		if p.Username == username {
-			// Supprimer le joueur en utilisant append
+
 			db.Players = append(db.Players[:i], db.Players[i+1:]...)
 			return saveDatabase(*db)
 		}
 	}
+	log.Print("Player removed successfully")
 	return fmt.Errorf("player not found")
 }
 
@@ -156,18 +162,20 @@ func listPlayers(db *Database) string {
 	for i, player := range db.Players {
 		playersList.WriteString(fmt.Sprintf("%d. %s\n", i+1, player.Username))
 	}
+	log.Print("List of player sent successfully")
 	return playersList.String()
 }
 
 // Lists all players in the database
 func listTables(db *Database) string {
 	if len(db.Tables) == 0 {
-		return "No players"
+		return "No tables"
 	}
 	var playersList strings.Builder
 	for i, Tables := range db.Tables {
 		playersList.WriteString(fmt.Sprintf("%d. %s\n", i+1, Tables.ID))
 	}
+	log.Print("List of tables sent successfully")
 	return playersList.String()
 }
 
@@ -180,15 +188,17 @@ func addTable(db *Database, numTables int) error {
 		}
 		db.Tables = append(db.Tables, newTable)
 	}
+	log.Print("Table added successfully")
 	return saveDatabase(*db)
 }
 
 // Removes table from database
 func removeTables(db *Database, numTables int) error {
 	if numTables > len(db.Tables) {
-		return fmt.Errorf("pas assez de tables à supprimer")
+		return fmt.Errorf("not enough tables to delete")
 	}
 	db.Tables = db.Tables[:len(db.Tables)-numTables]
+	log.Print("Table removed successfully")
 	return saveDatabase(*db)
 }
 
@@ -197,6 +207,7 @@ func getCurrentTournament(db *Database) *Tournament {
 	if len(db.Tournaments) == 0 {
 		return nil
 	}
+	log.Print("Current tournament found")
 	return &db.Tournaments[len(db.Tournaments)-1]
 }
 
@@ -204,38 +215,38 @@ func getCurrentTournament(db *Database) *Tournament {
 func getTournamentStatus(db Database) string {
 	tournament := getCurrentTournament(&db)
 	if tournament == nil {
-		return "Aucun tournoi en cours."
+		return "No tournaments in progress."
 	}
 
 	if tournament.Status == TournamentStatusComplete {
-		return "Aucun tournoi en cours. Le dernier tournoi est terminé."
+		return "No tournaments in progress. The last tournament is over."
 	}
 
-	status := fmt.Sprintf("État du tournoi (ID: %s):\n", tournament.ID)
+	status := fmt.Sprintf("Tournament status (ID: %s):\n", tournament.ID)
 	status += fmt.Sprintf("Statut: %s\n", tournament.Status)
-	status += fmt.Sprintf("Tour actuel: %d\n\n", tournament.CurrentRound+1)
+	status += fmt.Sprintf("Current tour: %d\n\n", tournament.CurrentRound+1)
 
 	currentRound := tournament.Rounds[tournament.CurrentRound]
-	status += "Matchs en cours:\n"
+	status += "Matches in progress:\n"
 	for _, match := range currentRound.Matches {
-		status += fmt.Sprintf("- Match %s: %s vs %s", match.ID, match.Player1, match.Player2)
+		status += fmt.Sprintf("- Matches %s: %s vs %s", match.ID, match.Player1, match.Player2)
 		if match.Winner != "" {
-			status += fmt.Sprintf(" (Gagnant: %s)", match.Winner)
+			status += fmt.Sprintf(" (Winner: %s)", match.Winner)
 		}
 		status += "\n"
 	}
-
+	log.Print("Tournament status sent successfully")
 	return status
 }
 
 // Starts a new tournament
 func startTournament(db *Database) error {
 	if len(db.Players) < 2 {
-		return fmt.Errorf("pas assez de joueurs pour démarrer un tournoi")
+		return fmt.Errorf("not enough players to start a tournament. Minimum 2 players required")
 	}
 
 	if len(db.Tables) == 0 {
-		return fmt.Errorf("aucune table disponible")
+		return fmt.Errorf("no table available")
 
 	}
 
@@ -244,7 +255,7 @@ func startTournament(db *Database) error {
 		CurrentRound: 0,
 		Status:       TournamentStatusPending,
 		Players:      make([]string, 0),
-		Stages:       make(map[string]map[string]bool),
+
 		IsFirstRound: true,
 	}
 
@@ -266,6 +277,7 @@ func startTournament(db *Database) error {
 	}
 
 	db.Tournaments = append(db.Tournaments, tournament)
+	log.Print("Tournament started successfully")
 	return saveDatabase(*db)
 }
 
@@ -275,13 +287,12 @@ func nextRound(db *Database) error {
 		return fmt.Errorf("no active tournament")
 	}
 	if tournament.Status != TournamentStatusOngoing {
-		return fmt.Errorf("le tournoi n'est pas en cours")
+		return fmt.Errorf("the tournament is not in progress")
 	}
 
 	currentRound := tournament.Rounds[tournament.CurrentRound]
 	winners := []string{}
 
-	// Vérifier tous les matchs d'abord
 	for _, match := range currentRound.Matches {
 		if match.Player2 == "" {
 			if match.Winner == "" {
@@ -290,7 +301,7 @@ func nextRound(db *Database) error {
 			winners = append(winners, match.Winner)
 		} else {
 			if match.Winner == "" {
-				return fmt.Errorf("le match %s n'est pas terminé", match.ID)
+				return fmt.Errorf("the %s match is not over", match.ID)
 			}
 			winners = append(winners, match.Winner)
 		}
@@ -315,6 +326,7 @@ func nextRound(db *Database) error {
 		Matches: nextMatches,
 	})
 	tournament.CurrentRound++
+	log.Print("Next round started successfully")
 	return saveDatabase(*db)
 }
 
@@ -328,7 +340,7 @@ func firstRound(players []Player, tables []Table) []Match {
 	log.Printf("Target Size for next round: %d", targetSize)
 	log.Printf("Matches needed: %d", matchesNeeded)
 
-	matches := []Match{}
+	var matches []Match
 	currentPlayerIndex := 0
 	//remainingPlayers := totalPlayers
 	tableIndex := 0
@@ -373,20 +385,21 @@ func firstRound(players []Player, tables []Table) []Match {
 			ID:      fmt.Sprintf("R1M%d", matchCounter),
 			Player1: players[currentPlayerIndex].Username,
 			Player2: "",
-			Winner:  players[currentPlayerIndex].Username, // Le joueur passe automatiquement
-			TableID: "",                                   // Pas besoin de table pour un bye
+			Winner:  players[currentPlayerIndex].Username, //The player automatically passes
+			TableID: "",                                   // No table needed for a bye
 		}
 
 		matches = append(matches, match)
 		currentPlayerIndex++
 		matchCounter++
 	}
-
+	log.Print("First round matches created successfully")
 	return matches
 }
 
+// Creates matches for the next round of the tournament
 func manageMatches(winners []string, tables []Table, roundNumber int) []Match {
-	matches := []Match{}
+	var matches []Match
 	matchCounter := 1
 
 	for i := 0; i < len(winners); i += 2 {
@@ -402,7 +415,7 @@ func manageMatches(winners []string, tables []Table, roundNumber int) []Match {
 			matchCounter++
 		}
 	}
-
+	log.Print("Next round matches created successfully")
 	return matches
 }
 
@@ -420,7 +433,7 @@ func updateMatchResult(db *Database, matchID string, winnerName string) error {
 		for k, match := range round.Matches {
 			if match.ID == matchID {
 				if match.Player1 != winnerName && match.Player2 != winnerName {
-					return fmt.Errorf("le gagnant doit être l'un des joueurs du match: %s ou %s", match.Player1, match.Player2)
+					return fmt.Errorf("the winner must be one of the players in the match: %s ou %s", match.Player1, match.Player2)
 				}
 				tournament.Rounds[j].Matches[k].Winner = winnerName
 				updateMatch = &tournament.Rounds[j].Matches[k]
@@ -435,7 +448,7 @@ func updateMatchResult(db *Database, matchID string, winnerName string) error {
 	}
 
 	if updateMatch == nil {
-		return fmt.Errorf("match non trouvé")
+		return fmt.Errorf("match not found")
 
 	}
 	if updateMatch.NextmatchID != "" {
@@ -453,20 +466,9 @@ func updateMatchResult(db *Database, matchID string, winnerName string) error {
 			}
 		}
 	}
-
+	log.Print("Match updated successfully")
 	return saveDatabase(*db)
-
 }
-
-// Adds a player to the specified stage
-func (t *Tournament) addPlayerToStage(stageName string, playerName string) {
-	if t.Stages[stageName] == nil {
-		t.Stages[stageName] = make(map[string]bool)
-	}
-	t.Stages[stageName][playerName] = true
-}
-
-/* Utility functions */
 
 // Returns the nearest even number
 func LargestPowerOfTwo(n int) int {
@@ -475,22 +477,43 @@ func LargestPowerOfTwo(n int) int {
 	}
 	power := math.Ceil(math.Log2(float64(n)))
 	return int(math.Pow(2, power))
-
 }
 
-func clearTournaments(db *Database) error {
-	db.Tournaments = []Tournament{}
+func verifySecurityCode(clearType string, userCode string) error {
+	inputCode, err := strconv.Atoi(userCode)
+	if err != nil {
+		return fmt.Errorf("invalid security code : %v", err)
+	}
 
+	if inputCode != securityCodes[clearType] {
+		return fmt.Errorf("incorrect security code")
+	}
+	log.Print("Security code verified successfully")
+	return nil
+}
+
+func generateSecurityCode(clearType string) int {
+	code := rand.Int() % 100000
+	securityCodes[clearType] = code
+	log.Print("Security code generated: ", code)
+	return code
+}
+
+func clearTournament(db *Database) error {
+	db.Tournaments = []Tournament{}
 	return saveDatabase(*db)
 }
+
 func clearPlayers(db *Database) error {
 	db.Players = []Player{}
 	return saveDatabase(*db)
 }
+
 func clearTables(db *Database) error {
 	db.Tables = []Table{}
 	return saveDatabase(*db)
 }
+
 func clearDatabase(db *Database) error {
 	db.Players = []Player{}
 	db.Tables = []Table{}
@@ -508,23 +531,28 @@ func registerCommands(s *discordgo.Session) {
 
 	commands := []*discordgo.ApplicationCommand{
 		{
+			Name:        "activedevbadge",
+			Description: "Command to obtain the Active Developer badge",
+			Type:        discordgo.ApplicationCommandType(1),
+		},
+		{
 			Name:        "smashbot",
-			Description: "Commandes principales du bot Smashbot",
+			Description: "Main Smashbot commands",
 			Type:        discordgo.ApplicationCommandType(1),
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Name:        "add",
-					Description: "Ajouter un joueur ou des tables",
+					Description: "Add a player or tables",
 					Type:        discordgo.ApplicationCommandOptionSubCommandGroup,
 					Options: []*discordgo.ApplicationCommandOption{
 						{
 							Name:        "player",
-							Description: "Ajouter un nouveau joueur",
+							Description: "Add new player",
 							Type:        discordgo.ApplicationCommandOptionSubCommand,
 							Options: []*discordgo.ApplicationCommandOption{
 								{
 									Name:        "username",
-									Description: "Nom du joueur",
+									Description: "Name of the player",
 									Type:        discordgo.ApplicationCommandOptionString,
 									Required:    true,
 								},
@@ -532,12 +560,12 @@ func registerCommands(s *discordgo.Session) {
 						},
 						{
 							Name:        "tables",
-							Description: "Ajouter des tables",
+							Description: "Add tables",
 							Type:        discordgo.ApplicationCommandOptionSubCommand,
 							Options: []*discordgo.ApplicationCommandOption{
 								{
 									Name:        "number",
-									Description: "Nombre de tables à ajouter",
+									Description: "Number of tables to add",
 									Type:        discordgo.ApplicationCommandOptionInteger,
 									Required:    true,
 								},
@@ -548,17 +576,17 @@ func registerCommands(s *discordgo.Session) {
 
 				{
 					Name:        "remove",
-					Description: "Supprimer un joueur ou des tables",
+					Description: "Delete a player or tables",
 					Type:        discordgo.ApplicationCommandOptionSubCommandGroup,
 					Options: []*discordgo.ApplicationCommandOption{
 						{
 							Name:        "player",
-							Description: "Nom du joueur à supprimer",
+							Description: "Name of the player to remove",
 							Type:        discordgo.ApplicationCommandOptionSubCommand,
 							Options: []*discordgo.ApplicationCommandOption{
 								{
 									Name:        "username",
-									Description: "Nom du joueur",
+									Description: "Name of the player",
 									Type:        discordgo.ApplicationCommandOptionString,
 									Required:    true,
 								},
@@ -566,12 +594,12 @@ func registerCommands(s *discordgo.Session) {
 						},
 						{
 							Name:        "tables",
-							Description: "Supprimer des tables",
+							Description: "delete tables",
 							Type:        discordgo.ApplicationCommandOptionSubCommand,
 							Options: []*discordgo.ApplicationCommandOption{
 								{
 									Name:        "number",
-									Description: "Nombre de tables à supprimer",
+									Description: "Number of tables to delete",
 									Type:        discordgo.ApplicationCommandOptionInteger,
 									Required:    true,
 								},
@@ -581,17 +609,17 @@ func registerCommands(s *discordgo.Session) {
 				},
 				{
 					Name:        "list",
-					Description: "Lister les joueurs ou les tables",
+					Description: "List of player or tables",
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
 					Options: []*discordgo.ApplicationCommandOption{
 						{
 							Name:        "type",
-							Description: "Type d'élément à lister (player/table)",
+							Description: "Type of item to list (player/table)",
 							Type:        discordgo.ApplicationCommandOptionString,
 							Required:    true,
 							Choices: []*discordgo.ApplicationCommandOptionChoice{
 								{
-									Name:  "Joueurs",
+									Name:  "Players",
 									Value: "player",
 								},
 								{
@@ -604,12 +632,12 @@ func registerCommands(s *discordgo.Session) {
 				},
 				{
 					Name:        "tournament",
-					Description: "Gérer le tournoi",
+					Description: "Manage tournaments",
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
 					Options: []*discordgo.ApplicationCommandOption{
 						{
 							Name:        "action",
-							Description: "Action à effectuer (start/next/status)",
+							Description: "Action to be taken (start/next/status)",
 							Type:        discordgo.ApplicationCommandOptionString,
 							Required:    true,
 							Choices: []*discordgo.ApplicationCommandOptionChoice{
@@ -631,18 +659,18 @@ func registerCommands(s *discordgo.Session) {
 				},
 				{
 					Name:        "match",
-					Description: "Gérer les résultats des matchs",
+					Description: "Manage match results",
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
 					Options: []*discordgo.ApplicationCommandOption{
 						{
 							Name:        "match_id",
-							Description: "ID du match",
+							Description: "ID of the match",
 							Type:        discordgo.ApplicationCommandOptionString,
 							Required:    true,
 						},
 						{
 							Name:        "winner",
-							Description: "Nom du gagnant",
+							Description: "Name of the winner",
 							Type:        discordgo.ApplicationCommandOptionString,
 							Required:    true,
 						},
@@ -650,25 +678,25 @@ func registerCommands(s *discordgo.Session) {
 				},
 				{
 					Name:        "clear",
-					Description: "Nettoyer la base de données",
+					Description: "clear the database",
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
 					Options: []*discordgo.ApplicationCommandOption{
 						{
 							Name:        "type",
-							Description: "Type d'élément à nettoyer (tournament/player/table/ALL)",
+							Description: "Type of element to be cleaned (tournament/player/table/ALL)",
 							Type:        discordgo.ApplicationCommandOptionString,
 							Required:    true,
 							Choices: []*discordgo.ApplicationCommandOptionChoice{
 								{
-									Name:  "tournament",
+									Name:  "Tournament",
 									Value: "tournament",
 								},
 								{
-									Name:  "player",
+									Name:  "Players",
 									Value: "player",
 								},
 								{
-									Name:  "table",
+									Name:  "Tables",
 									Value: "table",
 								},
 								{
@@ -679,22 +707,64 @@ func registerCommands(s *discordgo.Session) {
 						},
 					},
 				},
+				{
+					Name:        "confirm-clear",
+					Description: "Confirm tournament deletion with security code",
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Name:        "code",
+							Description: "Security code received",
+							Type:        discordgo.ApplicationCommandOptionInteger,
+							Required:    true,
+						},
+						{
+							Name:        "type",
+							Description: "Type d'élément à nettoyer (tournoi/joueur/table/tous)",
+							Type:        discordgo.ApplicationCommandOptionString,
+							Required:    true,
+							Choices: []*discordgo.ApplicationCommandOptionChoice{
+								{
+									Name:  "Tournament",
+									Value: "tournament",
+								},
+								{
+									Name:  "Players",
+									Value: "player",
+								},
+								{
+									Name:  "Tables",
+									Value: "table",
+								},
+								{
+									Name:  "ALL",
+									Value: "ALL",
+								},
+							},
+						},
+					},
+				},
+				{
+					Name:        "help",
+					Description: "Display all available commands",
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+				},
 			},
 		},
 	}
 
-	// Enregistrer les commandes
+	// Register commands
 	for _, cmd := range commands {
 		_, err := s.ApplicationCommandCreate(s.State.User.ID, "", cmd)
 		if err != nil {
-			log.Printf("Erreur lors de la création de la commande %v: %v", cmd.Name, err)
+			log.Printf("Order creation error %v: %v", cmd.Name, err)
 		}
 	}
 	log.Println("Commands registered successfully!")
 }
 
 func sendInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCreate, title, description string, color int) {
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Embeds: []*discordgo.MessageEmbed{
@@ -706,234 +776,342 @@ func sendInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCreat
 			},
 		},
 	})
+	if err != nil {
+		return
+	}
 }
 
+// Main function to handle commands
 func handleCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if i.Type != discordgo.InteractionApplicationCommand {
 		return
 	}
 
 	data := i.ApplicationCommandData()
-	if data.Name != "smashbot" {
+
+	switch data.Name {
+	case "activedevbadge":
+		sendInteractionResponse(s, i, "Active Developer Badge",
+			"This command helps you get your Active Developer badge. Visit https://discord.com/developers/active-developer to claim your badge.",
+			0x00FF00)
+		log.Print("Active Developer Badge sent successfully")
 		return
-	}
 
-	// Charger la base de données
-	db, err := loadDatabase()
-	if err != nil {
-		sendInteractionResponse(s, i, "Erreur", "Erreur lors du chargement de la base de données", 0xFF0000)
-		return
-	}
-
-	// Obtenir la sous-commande et ses options
-	if len(data.Options) == 0 {
-		sendInteractionResponse(s, i, "Erreur", "Commande invalide", 0xFF0000)
-		return
-	}
-
-	groupCmd := data.Options[0]
-
-	switch groupCmd.Name {
-	case "add":
-		if len(groupCmd.Options) == 0 {
-			sendInteractionResponse(s, i, "Erreur", "Options manquantes", 0xFF0000)
+	case "smashbot":
+		// Load the database
+		db, err := loadDatabase()
+		if err != nil {
+			sendInteractionResponse(s, i, "Erreur", "Error loading database", 0xFF0000)
 			return
 		}
 
-		subCmd := groupCmd.Options[0]
-		switch subCmd.Name {
-		case "player":
-			if len(subCmd.Options) == 0 {
-				sendInteractionResponse(s, i, "Erreur", "Nom du joueur manquant", 0xFF0000)
-				return
-			}
-			username := subCmd.Options[0].StringValue()
-			newPlayer := Player{
-				ID:       uuid.New().String(),
-				Username: username,
-			}
-			err = addPlayer(db, newPlayer)
-			if err != nil {
-				sendInteractionResponse(s, i, "Erreur", "Erreur lors de l'ajout du joueur: "+err.Error(), 0xFF0000)
-				return
-			}
-			sendInteractionResponse(s, i, "Succès", fmt.Sprintf("Joueur %s ajouté avec succès!", newPlayer.Username), 0x00FF00)
-
-		case "tables":
-			if len(subCmd.Options) == 0 {
-				sendInteractionResponse(s, i, "Erreur", "Nombre de tables manquant", 0xFF0000)
-				return
-			}
-			numTables := int(subCmd.Options[0].IntValue())
-			err = addTable(db, numTables)
-			if err != nil {
-				sendInteractionResponse(s, i, "Erreur", "Erreur lors de l'ajout des tables: "+err.Error(), 0xFF0000)
-				return
-			}
-			sendInteractionResponse(s, i, "Succès", fmt.Sprintf("%d tables ajoutées avec succès!", numTables), 0x00FF00)
-		}
-
-	case "remove":
-		if len(groupCmd.Options) == 0 {
-			sendInteractionResponse(s, i, "Erreur", "Options manquantes", 0xFF0000)
+		if len(data.Options) == 0 {
+			sendInteractionResponse(s, i, "Erreur", "Commande invalide", 0xFF0000)
 			return
 		}
 
-		subCmd := groupCmd.Options[0]
-		switch subCmd.Name {
-		case "player":
-			if len(subCmd.Options) == 0 {
-				sendInteractionResponse(s, i, "Erreur", "Nom du joueur manquant", 0xFF0000)
-				return
-			}
-			username := subCmd.Options[0].StringValue()
-			err = removePlayer(db, username)
-			if err != nil {
-				sendInteractionResponse(s, i, "Erreur", "Erreur lors de la suppression du joueur: "+err.Error(), 0xFF0000)
-				return
-			}
-			sendInteractionResponse(s, i, "Succès", fmt.Sprintf("Joueur %s supprimé avec succès!", username), 0x00FF00)
-
-		case "tables":
-			if len(subCmd.Options) == 0 {
-				sendInteractionResponse(s, i, "Erreur", "Nombre de tables manquant", 0xFF0000)
-				return
-			}
-			numTables := int(subCmd.Options[0].IntValue())
-			err = removeTables(db, numTables)
-			if err != nil {
-				sendInteractionResponse(s, i, "Erreur", "Erreur lors de la suppression des tables: "+err.Error(), 0xFF0000)
-				return
-			}
-			sendInteractionResponse(s, i, "Succès", fmt.Sprintf("%d tables supprimées avec succès!", numTables), 0x00FF00)
-		}
-
-	case "list":
-		if len(groupCmd.Options) == 0 {
-			sendInteractionResponse(s, i, "Erreur", "Type de liste manquant", 0xFF0000)
-			return
-		}
-		listType := groupCmd.Options[0].StringValue()
-		var list string
-		switch listType {
-		case "player":
-			list = listPlayers(db)
-		case "table":
-			list = listTables(db)
-		}
-		sendInteractionResponse(s, i, fmt.Sprintf("Liste des %s", listType), list, 0x00FF00)
-
-	case "tournament":
-		if len(groupCmd.Options) == 0 {
-			sendInteractionResponse(s, i, "Erreur", "Action manquante", 0xFF0000)
-			return
-		}
-		action := groupCmd.Options[0].StringValue()
-		switch action {
-		case "start":
-			err := startTournament(db)
-			if err != nil {
-				sendInteractionResponse(s, i, "Erreur", "Erreur lors du démarrage du tournoi: "+err.Error(), 0xFF0000)
-				return
-			}
-			tournament := getCurrentTournament(db)
-			var matchesInfo strings.Builder
-			matchesInfo.WriteString(fmt.Sprintf("Tournoi ID: %s\n\n", tournament.ID))
-			matchesInfo.WriteString("Liste des joueurs:\n")
-			for i, player := range tournament.Players {
-				matchesInfo.WriteString(fmt.Sprintf("%d. %s\n", i+1, player))
-			}
-			matchesInfo.WriteString("\nMatches du premier tour:\n")
-			for _, match := range tournament.Rounds[0].Matches {
-				matchesInfo.WriteString(fmt.Sprintf("Match %s: %s vs %s (Table: %s)\n",
-					match.ID, match.Player1, match.Player2, match.TableID))
-			}
-			sendInteractionResponse(s, i, "Tournoi démarré", matchesInfo.String(), 0x00FF00)
-
-		case "status":
-			status := getTournamentStatus(*db)
-			sendInteractionResponse(s, i, "État du tournoi", status, 0x00FF00)
-
-		case "next":
-			err := nextRound(db)
-			if err != nil {
-				sendInteractionResponse(s, i, "Erreur", "Erreur lors du passage au tour suivant: "+err.Error(), 0xFF0000)
+		groupCmd := data.Options[0]
+		switch groupCmd.Name {
+		case "add":
+			if len(groupCmd.Options) == 0 {
+				sendInteractionResponse(s, i, "Erreur", "Missing options", 0xFF0000)
 				return
 			}
 
-			tournament := getCurrentTournament(db)
-			if tournament.Status == TournamentStatusComplete {
-				lastRound := tournament.Rounds[len(tournament.Rounds)-1]
-				winner := lastRound.Matches[0].Winner
-				sendInteractionResponse(s, i, "Tournoi terminé!", fmt.Sprintf("Le tournoi est terminé! Le gagnant est : %s", winner), 0x00FF00)
+			subCmd := groupCmd.Options[0]
+			switch subCmd.Name {
+			case "player":
+				if len(subCmd.Options) == 0 {
+					sendInteractionResponse(s, i, "Erreur", "Name of the player missing", 0xFF0000)
+					return
+				}
+				username := subCmd.Options[0].StringValue()
+				newPlayer := Player{
+					ID:       uuid.New().String(),
+					Username: username,
+				}
+				err = addPlayer(db, newPlayer)
+				if err != nil {
+					sendInteractionResponse(s, i, "Erreur", "Error adding player: "+err.Error(), 0xFF0000)
+					return
+				}
+				sendInteractionResponse(s, i, "Succès", fmt.Sprintf("Player %s added successfully!", newPlayer.Username), 0x00FF00)
+				log.Print("Player added successfully")
+
+			case "tables":
+				if len(subCmd.Options) == 0 {
+					sendInteractionResponse(s, i, "Erreur", "Number of tables missing", 0xFF0000)
+					return
+				}
+				numTables := int(subCmd.Options[0].IntValue())
+				err = addTable(db, numTables)
+				if err != nil {
+					sendInteractionResponse(s, i, "Erreur", "Error adding tables: "+err.Error(), 0xFF0000)
+					return
+				}
+				sendInteractionResponse(s, i, "Succès", fmt.Sprintf("%d table successfully added!", numTables), 0x00FF00)
+				log.Print("Tables added successfully")
+			}
+
+		case "remove":
+			if len(groupCmd.Options) == 0 {
+				sendInteractionResponse(s, i, "Erreur", "Missing options", 0xFF0000)
 				return
 			}
 
-			currentRound := tournament.Rounds[tournament.CurrentRound]
-			var matchesInfo strings.Builder
-			matchesInfo.WriteString(fmt.Sprintf("Tour %d:\n\n", tournament.CurrentRound+1))
+			subCmd := groupCmd.Options[0]
+			switch subCmd.Name {
+			case "player":
+				if len(subCmd.Options) == 0 {
+					sendInteractionResponse(s, i, "Erreur", "Missing player name", 0xFF0000)
+					return
+				}
+				username := subCmd.Options[0].StringValue()
+				err = removePlayer(db, username)
+				if err != nil {
+					sendInteractionResponse(s, i, "Erreur", "Error when deleting player: "+err.Error(), 0xFF0000)
+					return
+				}
+				sendInteractionResponse(s, i, "Succès", fmt.Sprintf("Player %s successfully deleted!", username), 0x00FF00)
+				log.Print("Player removed successfully")
 
-			for _, match := range currentRound.Matches {
-				if match.Player2 == "" {
-					matchesInfo.WriteString(fmt.Sprintf("Match %s: %s passe automatiquement\n",
-						match.ID, match.Player1))
-				} else {
+			case "tables":
+				if len(subCmd.Options) == 0 {
+					sendInteractionResponse(s, i, "Erreur", "Number of missing tables", 0xFF0000)
+					return
+				}
+				numTables := int(subCmd.Options[0].IntValue())
+				err = removeTables(db, numTables)
+				if err != nil {
+					sendInteractionResponse(s, i, "Erreur", "Error deleting tables: "+err.Error(), 0xFF0000)
+					return
+				}
+				sendInteractionResponse(s, i, "Succès", fmt.Sprintf("%d tables successfully deleted !", numTables), 0x00FF00)
+				log.Print("Tables removed successfully")
+			}
+
+		case "list":
+			if len(groupCmd.Options) == 0 {
+				sendInteractionResponse(s, i, "Erreur", "Missing list type", 0xFF0000)
+				return
+			}
+			listType := groupCmd.Options[0].StringValue()
+			var list string
+			switch listType {
+			case "player":
+				list = listPlayers(db)
+			case "table":
+				list = listTables(db)
+			}
+			sendInteractionResponse(s, i, fmt.Sprintf("List of %s", listType), list, 0x00FF00)
+			log.Print("List sent successfully")
+
+		case "tournament":
+			if len(groupCmd.Options) == 0 {
+				sendInteractionResponse(s, i, "Erreur", "(Action missing)", 0xFF0000)
+				return
+			}
+			action := groupCmd.Options[0].StringValue()
+			switch action {
+			case "start":
+				err := startTournament(db)
+				if err != nil {
+					sendInteractionResponse(s, i, "Erreur", "Tournament startup error : "+err.Error(), 0xFF0000)
+					return
+				}
+				tournament := getCurrentTournament(db)
+				var matchesInfo strings.Builder
+				matchesInfo.WriteString(fmt.Sprintf("Tournoi ID: %s\n\n", tournament.ID))
+				matchesInfo.WriteString("List of players:\n")
+				for i, player := range tournament.Players {
+					matchesInfo.WriteString(fmt.Sprintf("%d. %s\n", i+1, player))
+				}
+				matchesInfo.WriteString("\nFirst-round matches:\n")
+				for _, match := range tournament.Rounds[0].Matches {
 					matchesInfo.WriteString(fmt.Sprintf("Match %s: %s vs %s (Table: %s)\n",
 						match.ID, match.Player1, match.Player2, match.TableID))
 				}
+				sendInteractionResponse(s, i, "Tournament started", matchesInfo.String(), 0x00FF00)
+				log.Print("Tournament started successfully")
+
+			case "status":
+				status := getTournamentStatus(*db)
+				sendInteractionResponse(s, i, "Tournament status", status, 0x00FF00)
+				log.Print("Tournament status sent successfully")
+
+			case "next":
+				err := nextRound(db)
+				if err != nil {
+					sendInteractionResponse(s, i, "Erreur", "Error when moving on to the next lap: "+err.Error(), 0xFF0000)
+					return
+				}
+
+				tournament := getCurrentTournament(db)
+				if tournament.Status == TournamentStatusComplete {
+					lastRound := tournament.Rounds[len(tournament.Rounds)-1]
+					winner := lastRound.Matches[0].Winner
+					sendInteractionResponse(s, i, "Tournament over!", fmt.Sprintf("The tournament is over! The winner is : %s", winner), 0x00FF00)
+					return
+				}
+
+				currentRound := tournament.Rounds[tournament.CurrentRound]
+				var matchesInfo strings.Builder
+				matchesInfo.WriteString(fmt.Sprintf("Round %d:\n\n", tournament.CurrentRound+1))
+
+				for _, match := range currentRound.Matches {
+					if match.Player2 == "" {
+						matchesInfo.WriteString(fmt.Sprintf("Match %s: %s passes automatically\n",
+							match.ID, match.Player1))
+					} else {
+						matchesInfo.WriteString(fmt.Sprintf("Match %s: %s vs %s (Table: %s)\n",
+							match.ID, match.Player1, match.Player2, match.TableID))
+					}
+				}
+
+				sendInteractionResponse(s, i, "New tour begins", matchesInfo.String(), 0x00FF00)
+				log.Print("Next round started successfully")
 			}
 
-			sendInteractionResponse(s, i, "Nouveau tour commencé", matchesInfo.String(), 0x00FF00)
-		}
+		case "match":
+			if len(groupCmd.Options) < 2 {
+				sendInteractionResponse(s, i, "Erreur", "Match ID and winner required", 0xFF0000)
+				return
+			}
+			matchID := groupCmd.Options[0].StringValue()
+			winnerName := groupCmd.Options[1].StringValue()
+			err := updateMatchResult(db, matchID, winnerName)
+			if err != nil {
+				sendInteractionResponse(s, i, "Erreur", "Error updating results: "+err.Error(), 0xFF0000)
+				return
+			}
+			sendInteractionResponse(s, i, "Success", "Match result successfully updated!", 0x00FF00)
+			log.Print("Match updated successfully")
 
-	case "match":
-		if len(groupCmd.Options) < 2 {
-			sendInteractionResponse(s, i, "Erreur", "ID du match et gagnant requis", 0xFF0000)
-			return
-		}
-		matchID := groupCmd.Options[0].StringValue()
-		winnerName := groupCmd.Options[1].StringValue()
-		err := updateMatchResult(db, matchID, winnerName)
-		if err != nil {
-			sendInteractionResponse(s, i, "Erreur", "Erreur lors de la mise à jour du résultat: "+err.Error(), 0xFF0000)
-			return
-		}
-		sendInteractionResponse(s, i, "Succès", "Résultat du match mis à jour avec succès!", 0x00FF00)
+		case "clear":
+			if len(groupCmd.Options) == 0 {
+				sendInteractionResponse(s, i, "Erreur", "Type of cleaning required", 0xFF0000)
+				return
+			}
+			clearType := groupCmd.Options[0].StringValue()
 
-	case "clear":
-		if len(groupCmd.Options) == 0 {
-			sendInteractionResponse(s, i, "Erreur", "Type de nettoyage requis", 0xFF0000)
-			return
+			switch clearType {
+			case "tournament":
+
+				sendInteractionResponse(s, i, "Security code",
+					fmt.Sprintf("To confirm the deletion of tournaments, use the command `/smashbot confirm-clear %05d`", generateSecurityCode("tournament")),
+					0xFFFF00)
+				return
+			case "player":
+
+				sendInteractionResponse(s, i, "Security code",
+					fmt.Sprintf("To confirm the deletion of the player, use the command `/smashbot confirm-clear %05d`", generateSecurityCode("player")),
+					0xFFFF00)
+				return
+			case "table":
+
+				sendInteractionResponse(s, i, "Security code",
+					fmt.Sprintf("To confirm the deletion of the table, use the command `/smashbot confirm-clear %05d`", generateSecurityCode("tables")),
+					0xFFFF00)
+				return
+			case "ALL":
+
+				sendInteractionResponse(s, i, "Security code",
+					fmt.Sprintf("To confirm the deletion of the database, use the command `/smashbot confirm-clear %05d`", generateSecurityCode("database")),
+					0xFFFF00)
+				return
+			}
+
+			sendInteractionResponse(s, i, "Success", "Cleaning successfully completed!", 0x00FF00)
+			log.Print("Database will be clear after confirmation")
+
+		case "confirm-clear":
+			if len(groupCmd.Options) < 2 {
+				sendInteractionResponse(s, i, "Erreur", "Security code and type missing", 0xFF0000)
+				return
+			}
+
+			securityCode := int(groupCmd.Options[0].IntValue())
+			clearType := groupCmd.Options[1].StringValue()
+
+			if err := verifySecurityCode(clearType, strconv.Itoa(securityCode)); err != nil {
+				sendInteractionResponse(s, i, "Erreur", fmt.Sprintf("Incorrect security code for %s: %v", clearType, err), 0xFF0000)
+				return
+			}
+
+			var (
+				err        error
+				successMsg string
+			)
+			log.Print(successMsg)
+			switch clearType {
+			case "tournament":
+				err = clearTournament(db)
+				successMsg = "Tournaments cleared successfully!"
+				log.Print("Tournaments cleared successfully")
+			case "player":
+				err = clearPlayers(db)
+				successMsg = "Players cleared successfully!"
+				log.Print("Players cleared successfully")
+			case "table":
+				err = clearTables(db)
+				successMsg = "Tables cleared successfully!"
+				log.Print("Tables cleared successfully")
+			case "ALL":
+				err = clearDatabase(db)
+				successMsg = "Database cleared successfully!"
+				log.Print("Database cleared successfully")
+			}
+
+			if err != nil {
+				sendInteractionResponse(s, i, "Erreur", fmt.Sprintf("Deletion error : %v", err), 0xFF0000)
+				return
+			}
+			sendInteractionResponse(s, i, "Success", successMsg, 0x00FF00)
+			log.Print("Tournaments cleared successfully")
 		}
-		clearType := groupCmd.Options[0].StringValue()
-		var err error
-		switch clearType {
-		case "tournament":
-			err = clearTournaments(db)
-		case "player":
-			err = clearPlayers(db)
-		case "table":
-			err = clearTables(db)
-		case "ALL":
-			err = clearDatabase(db)
-		}
-		if err != nil {
-			sendInteractionResponse(s, i, "Erreur", fmt.Sprintf("Erreur lors du nettoyage: %v", err), 0xFF0000)
-			return
-		}
-		sendInteractionResponse(s, i, "Succès", "Nettoyage effectué avec succès!", 0x00FF00)
+	case "help":
+		helpMessage := `
+**SmashBot Commands**
+
+*Tournament Management*
+- /smashbot tournament start - Start a new tournament
+- /smashbot tournament next - Move to next round
+- /smashbot tournament status - Display current tournament status
+
+*Match Management*
+- /smashbot match - Update match results with winner
+
+*Player Management*
+- /smashbot add player - Add new player to database
+- /smashbot remove player - Remove player from database
+- /smashbot list player - Display all registered players
+
+*Table Management*
+- /smashbot add tables - Add tables to venue
+- /smashbot remove tables - Remove tables from venue
+- /smashbot list table - Display all available tables
+
+*Database Management*
+- /smashbot clear - Clear specified data (tournament/player/table/ALL)
+- /smashbot confirm-clear - Confirm clearing with security code
+
+For more details about specific commands, use them directly to see options and requirements.`
+
+		sendInteractionResponse(s, i, "Help - Available Commands", helpMessage, 0x00FF00)
+		log.Print("Help message sent successfully")
+
 	}
 }
 
 func main() {
 	err := godotenv.Load()
 	if err != nil {
-		log.Fatal("Erreur lors du chargement du fichier .env")
+		log.Fatal("Error loading .env file")
 	}
 
 	token := os.Getenv("DISCORD_BOT_TOKEN")
 	if token == "" {
-		log.Fatal("Le token du bot n'est pas défini dans le fichier .env")
+		log.Fatal("Bot token not defined in .env file")
 	}
 
 	sess, err := discordgo.New("Bot " + token)
@@ -941,20 +1119,16 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Ajouter le handler pour les commandes slash
 	sess.AddHandler(func(s *discordgo.Session, r *discordgo.Ready) {
 		log.Printf("Bot is ready! Logged in as: %v#%v", s.State.User.Username, s.State.User.Discriminator)
-		// Enregistrer les commandes slash une fois que le bot est prêt
 		registerCommands(s)
 	})
 
 	sess.AddHandler(handleCommands)
 
-	// Définir les intents nécessaires
 	sess.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsGuildIntegrations
 
-	err = sess.Open()
-	if err != nil {
+	if err := sess.Open(); err != nil {
 		log.Fatal(err)
 	}
 	defer sess.Close()
