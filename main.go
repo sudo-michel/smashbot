@@ -46,6 +46,7 @@ type Tournament struct {
 	Status       TournamentStatus `json:"status"`
 	CurrentRound int              `json:"current_round"`
 	IsFirstRound bool             `json:"is_first_round"`
+	Tables       []Table          `json:"tables"`
 }
 
 type Match struct {
@@ -73,6 +74,7 @@ const (
 	TournamentStatusPending  TournamentStatus = "pending"
 	TournamentStatusOngoing  TournamentStatus = "ongoing"
 	TournamentStatusComplete TournamentStatus = "complete"
+	BOT_COMMAND_PREFIX       string           = "smashbot"
 )
 
 // Loads or creates new database from file
@@ -255,8 +257,8 @@ func startTournament(db *Database) error {
 		CurrentRound: 0,
 		Status:       TournamentStatusPending,
 		Players:      make([]string, 0),
-
 		IsFirstRound: true,
+		Tables:       db.Tables,
 	}
 
 	players := make([]Player, len(db.Players))
@@ -312,22 +314,109 @@ func nextRound(db *Database) error {
 		return saveDatabase(*db)
 	}
 
-	nextRoundNumber := tournament.CurrentRound + 2
 	var nextMatches []Match
+	nextRoundNumber := tournament.CurrentRound + 2
 
-	if tournament.IsFirstRound {
-		tournament.IsFirstRound = false
-		nextMatches = manageMatches(winners, db.Tables, nextRoundNumber)
-	} else {
-		nextMatches = manageMatches(winners, db.Tables, nextRoundNumber)
+	for i := 0; i < len(winners); i += 2 {
+		match := Match{
+			ID:      fmt.Sprintf("R%dM%d", nextRoundNumber, i/2+1),
+			Player1: winners[i],
+		}
+		if i+1 < len(winners) {
+			match.Player2 = winners[i+1]
+			if len(winners) > 0 {
+				match.TableID = db.Tables[(i/2)%len(db.Tables)].ID
+			}
+		} else {
+			match.Winner = match.Player1
+		}
+
+		nextMatches = append(nextMatches, match)
 	}
 
 	tournament.Rounds = append(tournament.Rounds, Round{
 		Matches: nextMatches,
 	})
+
 	tournament.CurrentRound++
 	log.Print("Next round started successfully")
 	return saveDatabase(*db)
+}
+
+func findNextPairMatch(matches []Match, currentMatchID string) *Match {
+	var currentRound, currentMatch int
+	fmt.Sscanf(currentMatchID, "R%dM%d", nil, &currentRound, &currentMatch)
+
+	nextMatchNumber := (currentMatch + 1) / 2
+	nextMatchID := fmt.Sprintf("R%dM%d", currentRound+1, nextMatchNumber)
+	for i := range matches {
+		if matches[i].ID == nextMatchID {
+			return &matches[i]
+		}
+	}
+	return nil
+}
+
+func updateNextRoundMatches(tournament *Tournament) error {
+	if tournament == nil || len(tournament.Rounds) == 0 {
+		return fmt.Errorf("tournament not initialized")
+	}
+	currentRound := tournament.CurrentRound
+	if currentRound >= len(tournament.Rounds)-1 {
+		return nil
+	}
+
+	currentMatches := tournament.Rounds[currentRound].Matches
+
+	var nextRoundMatches []Match
+
+	for i := 0; i < len(currentMatches); i += 2 {
+		match1 := currentMatches[i]
+		if match1.Winner == "" {
+			return nil
+		}
+
+		if i+1 < len(currentMatches) {
+			match2 := currentMatches[i+1]
+			if match2.Winner == "" {
+				return nil
+			}
+
+			nextMatch := findNextPairMatch(tournament.Rounds[currentRound+1].Matches, match1.ID)
+			if nextMatch == nil {
+
+				nextMatch = &Match{
+					ID:      fmt.Sprintf("R%dM%d", currentRound+2, (i/2)+1),
+					Player1: match1.Winner,
+					Player2: match2.Winner,
+				}
+				if len(tournament.Tables) > 0 {
+					nextMatch.TableID = tournament.Tables[(i/2)%len(tournament.Tables)].ID
+				}
+				nextRoundMatches = append(nextRoundMatches, *nextMatch)
+			} else {
+
+				nextMatch.Player1 = match1.Winner
+				nextMatch.Player2 = match2.Winner
+			}
+		} else {
+			nextMatch := &Match{
+				ID:      fmt.Sprintf("R%dM%d", currentRound+2, (i/2)+1),
+				Player1: match1.Winner,
+				Winner:  match1.Winner,
+			}
+			nextRoundMatches = append(nextRoundMatches, *nextMatch)
+		}
+
+	}
+
+	if len(tournament.Rounds) <= currentRound+1 {
+		tournament.Rounds = append(tournament.Rounds, Round{Matches: nextRoundMatches})
+	} else {
+		tournament.Rounds[currentRound+1].Matches = nextRoundMatches
+	}
+
+	return nil
 }
 
 // Creates matches for the first round of the tournament
@@ -400,20 +489,22 @@ func firstRound(players []Player, tables []Table) []Match {
 // Creates matches for the next round of the tournament
 func manageMatches(winners []string, tables []Table, roundNumber int) []Match {
 	var matches []Match
-	matchCounter := 1
 
 	for i := 0; i < len(winners); i += 2 {
-		if i+1 < len(winners) {
-			match := Match{
-				ID:      fmt.Sprintf("R%dM%d", roundNumber, matchCounter),
-				Player1: winners[i],
-				Player2: winners[i+1],
-				Winner:  "",
-				TableID: tables[i/2%len(tables)].ID,
-			}
-			matches = append(matches, match)
-			matchCounter++
+		match := Match{
+			ID:      fmt.Sprintf("R%dM%d", roundNumber, (i/2)+1),
+			Player1: winners[i],
 		}
+		if i+1 < len(winners) {
+			match.Player2 = winners[i+1]
+			if len(tables) > 0 {
+				match.TableID = tables[(i/2)%len(tables)].ID
+			}
+		} else {
+			match.Winner = winners[i]
+		}
+		matches = append(matches, match)
+
 	}
 	log.Print("Next round matches created successfully")
 	return matches
@@ -426,17 +517,15 @@ func updateMatchResult(db *Database, matchID string, winnerName string) error {
 		return fmt.Errorf("no active tournament")
 	}
 
-	var updateMatch *Match
 	matchFound := false
 
-	for j, round := range tournament.Rounds {
-		for k, match := range round.Matches {
-			if match.ID == matchID {
-				if match.Player1 != winnerName && match.Player2 != winnerName {
-					return fmt.Errorf("the winner must be one of the players in the match: %s ou %s", match.Player1, match.Player2)
+	for i := range tournament.Rounds {
+		for j := range tournament.Rounds[i].Matches {
+			if tournament.Rounds[i].Matches[j].ID == matchID {
+				if tournament.Rounds[i].Matches[j].Player1 != winnerName && tournament.Rounds[i].Matches[j].Player2 != winnerName {
+					return fmt.Errorf("the winner must be one of the players in the match: %s ou %s", tournament.Rounds[i].Matches[j].Player1, tournament.Rounds[i].Matches[j].Player2)
 				}
-				tournament.Rounds[j].Matches[k].Winner = winnerName
-				updateMatch = &tournament.Rounds[j].Matches[k]
+				tournament.Rounds[i].Matches[j].Winner = winnerName
 				matchFound = true
 				break
 
@@ -446,26 +535,32 @@ func updateMatchResult(db *Database, matchID string, winnerName string) error {
 			break
 		}
 	}
-
-	if updateMatch == nil {
+	if !matchFound {
 		return fmt.Errorf("match not found")
-
 	}
-	if updateMatch.NextmatchID != "" {
-		nextMatchFound := false
-		for j, round := range tournament.Rounds {
-			for k, match := range round.Matches {
-				if match.ID == updateMatch.NextmatchID {
-					tournament.Rounds[j].Matches[k].Player2 = winnerName
-					nextMatchFound = true
-					break
-				}
-			}
-			if nextMatchFound {
-				break
-			}
+
+	err := updateNextRoundMatches(tournament)
+	if err != nil {
+		return fmt.Errorf("error updating next round matches: %w", err)
+	}
+
+	currentRound := tournament.Rounds[tournament.CurrentRound]
+	allMathcesCompleted := true
+
+	for _, match := range currentRound.Matches {
+		if match.Winner == "" && match.Player2 != "" {
+			allMathcesCompleted = false
+			break
 		}
 	}
+
+	for allMathcesCompleted {
+		tournament.CurrentRound++
+		if tournament.CurrentRound >= len(tournament.Rounds) || (len(tournament.Rounds[tournament.CurrentRound].Matches) == 1 && tournament.Rounds[tournament.CurrentRound].Matches[0].Winner != "") {
+			tournament.Status = TournamentStatusComplete
+		}
+	}
+
 	log.Print("Match updated successfully")
 	return saveDatabase(*db)
 }
@@ -521,6 +616,16 @@ func clearDatabase(db *Database) error {
 	return saveDatabase(*db)
 }
 
+func creatEarlyNextMatch(matches []Match, tables []Table, roundNumber int, mathCounter int) Match {
+	match := Match{
+		ID:      fmt.Sprintf("R%dM%d", roundNumber, mathCounter),
+		Player1: matches[0].Winner,
+		Player2: matches[1].Winner,
+		TableID: tables[0].ID,
+	}
+	return match
+}
+
 func registerCommands(s *discordgo.Session) {
 	log.Print("Registering commands...")
 
@@ -536,7 +641,7 @@ func registerCommands(s *discordgo.Session) {
 			Type:        discordgo.ApplicationCommandType(1),
 		},
 		{
-			Name:        "smashbot",
+			Name:        BOT_COMMAND_PREFIX,
 			Description: "Main Smashbot commands",
 			Type:        discordgo.ApplicationCommandType(1),
 			Options: []*discordgo.ApplicationCommandOption{
@@ -797,7 +902,7 @@ func handleCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		log.Print("Active Developer Badge sent successfully")
 		return
 
-	case "smashbot":
+	case BOT_COMMAND_PREFIX:
 		// Load the database
 		db, err := loadDatabase()
 		if err != nil {
@@ -984,7 +1089,32 @@ func handleCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				sendInteractionResponse(s, i, "Erreur", "Error updating results: "+err.Error(), 0xFF0000)
 				return
 			}
-			sendInteractionResponse(s, i, "Success", "Match result successfully updated!", 0x00FF00)
+
+			tournament := getCurrentTournament(db)
+			var responseMsg string
+
+			if tournament.Status == TournamentStatusComplete {
+				winner := tournament.Rounds[len(tournament.Rounds)-1].Matches[0].Winner
+				responseMsg = fmt.Sprintf("The tournament is over! The winner is: %s", winner)
+			} else if len(tournament.Rounds) > tournament.CurrentRound {
+				currentRound := tournament.Rounds[tournament.CurrentRound]
+				var matchesInfo strings.Builder
+				matchesInfo.WriteString(fmt.Sprintf("Round %d:\n\n", tournament.CurrentRound+1))
+				for _, match := range currentRound.Matches {
+					if match.Player2 == "" {
+						matchesInfo.WriteString(fmt.Sprintf("Match %s: %s passes automatically\n",
+							match.ID, match.Player1))
+					} else {
+						matchesInfo.WriteString(fmt.Sprintf("Match %s: %s vs %s (Table: %s)\n",
+							match.ID, match.Player1, match.Player2, match.TableID))
+					}
+				}
+				responseMsg = matchesInfo.String()
+			} else {
+				responseMsg = "Match result successfully updated!"
+
+			}
+			sendInteractionResponse(s, i, "Success", responseMsg, 0x00FF00)
 			log.Print("Match updated successfully")
 
 		case "clear":
