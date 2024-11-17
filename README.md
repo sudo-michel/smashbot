@@ -67,10 +67,6 @@ go run .
 ### Help
 - `/smashbot help` - Display all available commands
 
-### Server Management
-- `/smashbot server start` - Start the web visualization server
-- `/smashbot server stop` - Stop the web visualization server
-
 ## Database Structure
 
 The bot uses a JSON file (`database.json`) to store all data:
