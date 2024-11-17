@@ -9,6 +9,7 @@ import (
 	"log"
 	"math"
 	"math/rand"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -66,9 +67,10 @@ type TournamentStatus string
 var securityCodes = map[string]int{
 	"tournament": 0,
 	"player":     0,
-	"table":      0,
+	"tables":     0,
 	"ALL":        0,
 }
+var webServer *http.Server
 
 const (
 	TournamentStatusPending  TournamentStatus = "pending"
@@ -512,7 +514,7 @@ func getTournamentStatus(db Database) string {
 		if len(nextRound.Matches) > 0 {
 			status += "\nNext Round Matches:\n"
 			for _, match := range nextRound.Matches {
-				if match.Player2 != "" { // On affiche uniquement les matches complets
+				if match.Player2 != "" {
 					status += fmt.Sprintf("Match %s: %s vs %s (Table: %s)\n",
 						match.ID,
 						match.Player1,
@@ -624,7 +626,7 @@ func registerCommands(s *discordgo.Session) {
 		},
 		{
 			Name:        BOT_COMMAND_PREFIX,
-			Description: "Main Smashbot commands",
+			Description: "Main Bot commands",
 			Type:        discordgo.ApplicationCommandType(1),
 			Options: []*discordgo.ApplicationCommandOption{
 				{
@@ -784,7 +786,7 @@ func registerCommands(s *discordgo.Session) {
 								},
 								{
 									Name:  "Tables",
-									Value: "table",
+									Value: "tables",
 								},
 								{
 									Name:  "ALL",
@@ -821,7 +823,7 @@ func registerCommands(s *discordgo.Session) {
 								},
 								{
 									Name:  "Tables",
-									Value: "table",
+									Value: "tables",
 								},
 								{
 									Name:  "ALL",
@@ -835,6 +837,29 @@ func registerCommands(s *discordgo.Session) {
 					Name:        "help",
 					Description: "Display all available commands",
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
+				},
+				{
+					Name:        "server",
+					Description: "Manage web server",
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Name:        "action",
+							Description: "Action to perform (start/stop)",
+							Type:        discordgo.ApplicationCommandOptionString,
+							Required:    true,
+							Choices: []*discordgo.ApplicationCommandOptionChoice{
+								{
+									Name:  "start",
+									Value: "start",
+								},
+								{
+									Name:  "stop",
+									Value: "stop",
+								},
+							},
+						},
+					},
 				},
 			},
 		},
@@ -868,6 +893,74 @@ func sendInteractionResponse(s *discordgo.Session, i *discordgo.InteractionCreat
 	}
 }
 
+func serveTournamentData(w http.ResponseWriter, r *http.Request) {
+
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	db, err := loadDatabase()
+	if err != nil {
+		http.Error(w, "Error loading database", http.StatusInternalServerError)
+		return
+	}
+
+	tournament := getCurrentTournament(db)
+	if tournament == nil {
+		http.Error(w, "No active tournament", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(tournament); err != nil {
+		http.Error(w, "Error encoding tournament data", http.StatusInternalServerError)
+		return
+	}
+}
+
+func startWebServer() error {
+	if webServer != nil {
+		return fmt.Errorf("server is already running")
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/tournament", serveTournamentData)
+	mux.Handle("/", http.FileServer(http.Dir("public")))
+
+	webServer = &http.Server{
+		Addr:    ":8080",
+		Handler: mux,
+	}
+
+	go func() {
+		if err := webServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("HTTP server error: %v", err)
+		}
+	}()
+
+	log.Printf("Web server started on http://localhost:8080")
+	return nil
+}
+
+func stopWebServer() error {
+	if webServer == nil {
+		return fmt.Errorf("no server is running")
+	}
+
+	if err := webServer.Close(); err != nil {
+		return fmt.Errorf("error stopping server: %v", err)
+	}
+
+	webServer = nil
+	log.Printf("Web server stopped")
+	return nil
+}
+
 // Main function to handle commands
 func handleCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if i.Type != discordgo.InteractionApplicationCommand {
@@ -899,6 +992,28 @@ func handleCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 		groupCmd := data.Options[0]
 		switch groupCmd.Name {
+		case "server":
+			if len(groupCmd.Options) == 0 {
+				sendInteractionResponse(s, i, "Error", "Missing action", 0xFF0000)
+				return
+			}
+
+			action := groupCmd.Options[0].StringValue()
+			switch action {
+			case "start":
+				if err := startWebServer(); err != nil {
+					sendInteractionResponse(s, i, "Error", fmt.Sprintf("Failed to start server: %v", err), 0xFF0000)
+					return
+				}
+				sendInteractionResponse(s, i, "Success", "Web server started on http://localhost:8080", 0x00FF00)
+
+			case "stop":
+				if err := stopWebServer(); err != nil {
+					sendInteractionResponse(s, i, "Error", fmt.Sprintf("Failed to stop server: %v", err), 0xFF0000)
+					return
+				}
+				sendInteractionResponse(s, i, "Success", "Web server stopped", 0x00FF00)
+			}
 		case "add":
 			if len(groupCmd.Options) == 0 {
 				sendInteractionResponse(s, i, "Erreur", "Missing options", 0xFF0000)
@@ -987,7 +1102,7 @@ func handleCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			switch listType {
 			case "player":
 				list = listPlayers(db)
-			case "table":
+			case "tables":
 				list = listTables(db)
 			}
 			sendInteractionResponse(s, i, fmt.Sprintf("List of %s", listType), list, 0x00FF00)
@@ -1097,16 +1212,15 @@ func handleCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 					fmt.Sprintf("To confirm the deletion of the player, use the command `/smashbot confirm-clear %05d`", generateSecurityCode("player")),
 					0xFFFF00)
 				return
-			case "table":
+			case "tables":
 
 				sendInteractionResponse(s, i, "Security code",
 					fmt.Sprintf("To confirm the deletion of the table, use the command `/smashbot confirm-clear %05d`", generateSecurityCode("tables")),
 					0xFFFF00)
 				return
 			case "ALL":
-
 				sendInteractionResponse(s, i, "Security code",
-					fmt.Sprintf("To confirm the deletion of the database, use the command `/smashbot confirm-clear %05d`", generateSecurityCode("database")),
+					fmt.Sprintf("To confirm the deletion of the database, use the command `/smashbot confirm-clear %05d type: ALL`", generateSecurityCode("ALL")), // Changé "database" en "ALL"
 					0xFFFF00)
 				return
 			}
@@ -1142,7 +1256,7 @@ func handleCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				err = clearPlayers(db)
 				successMsg = "Players cleared successfully!"
 				log.Print("Players cleared successfully")
-			case "table":
+			case "tables":
 				err = clearTables(db)
 				successMsg = "Tables cleared successfully!"
 				log.Print("Tables cleared successfully")
@@ -1159,6 +1273,7 @@ func handleCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			sendInteractionResponse(s, i, "Success", successMsg, 0x00FF00)
 			log.Print("Tournaments cleared successfully")
 		}
+
 	case "help":
 		helpMessage := `
 **SmashBot Commands**
@@ -1225,7 +1340,18 @@ func main() {
 
 	log.Print("Bot is running")
 
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/tournament", serveTournamentData)
+	mux.Handle("/", http.FileServer(http.Dir("public")))
+
+	go func() {
+		log.Printf("Starting HTTP server on :8080")
+		if err := http.ListenAndServe(":8080", mux); err != nil {
+			log.Printf("HTTP server error: %v", err)
+		}
+	}()
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 	<-sc
+
 }
