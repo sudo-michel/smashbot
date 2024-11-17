@@ -67,6 +67,10 @@ go run .
 ### Help
 - `/smashbot help` - Display all available commands
 
+### Server Management
+- `/smashbot server start` - Start the web visualization server
+- `/smashbot server stop` - Stop the web visualization server
+
 ## Database Structure
 
 The bot uses a JSON file (`database.json`) to store all data:
@@ -83,6 +87,21 @@ The tournament system follows these rules:
 4. Tracks match results
 5. Generates next round matches automatically
 6. Determines tournament winner
+
+## Web Interface
+The bot includes a web interface for tournament visualization:
+
+### Features
+- Real-time tournament bracket display
+- Player list visualization
+- Match status tracking
+- Table assignments display
+- Round progression visualization
+
+### Using the Web Interface
+1. Start the web server:
+
+`/smashbot server start`
 
 
 ## Customization
